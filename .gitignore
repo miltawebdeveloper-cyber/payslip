@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+.env.local
+backend/uploads/*
+!backend/uploads/.gitkeep
+backend/generated-pdfs/*
+!backend/generated-pdfs/.gitkeep
+npm-debug.log*
+.DS_Store
