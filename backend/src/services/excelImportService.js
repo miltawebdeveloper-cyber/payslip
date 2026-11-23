@@ -1,7 +1,8 @@
 const XLSX = require('xlsx');
-const { MONTH_NAMES, PAYROLL_TYPES } = require('../config/constants');
+const { MONTH_NAMES } = require('../config/constants');
 const { daysInMonth } = require('./durationService');
-const { upsertEmployeeAndSalaryData } = require('./salaryRecordService');
+const { parsePayrollType } = require('./salaryRecordService');
+const { upsertRecords } = require('./salaryStore');
 
 // Maps a normalized column header to the internal field key it feeds.
 const FIELD_ALIASES = {
@@ -123,14 +124,6 @@ function parseMonthYear(monthRaw, yearRaw) {
   return { month: monthNum, year };
 }
 
-function parsePayrollType(raw) {
-  const norm = normalizeHeader(raw).replace(/\s+/g, '');
-  if (['pfesi', 'pfandesi'].includes(norm)) return PAYROLL_TYPES.PF_ESI;
-  if (norm === 'pfonly') return PAYROLL_TYPES.PF_ONLY;
-  if (['nodeduction', 'none', 'nodeductions'].includes(norm)) return PAYROLL_TYPES.NO_DEDUCTION;
-  return null;
-}
-
 function parseDateValue(raw) {
   if (isBlank(raw)) return null;
   if (raw instanceof Date) return raw;
@@ -155,6 +148,7 @@ function parseRow(record) {
 
   const employeeId = String(record.employee_id || '').trim();
   if (!employeeId) errors.push('Employee ID is required');
+  else if (employeeId.includes('~')) errors.push('Employee ID cannot contain "~"');
 
   const employeeName = String(record.employee_name || '').trim();
   if (!employeeName) errors.push('Employee Name is required');
@@ -252,6 +246,7 @@ async function importSalaryDataFromExcel(fileBuffer) {
   let updatedRecords = 0;
   let failedRecords = 0;
   const errors = [];
+  const valid = [];
 
   for (let i = 0; i < dataRows.length; i += 1) {
     const rowNumber = i + 2; // +1 for header row, +1 for 1-based spreadsheet rows
@@ -268,13 +263,29 @@ async function importSalaryDataFromExcel(fileBuffer) {
       continue;
     }
 
+    valid.push({ rowNumber, payload });
+  }
+
+  // Valid rows are saved to the Google Sheet in one call. A later row for
+  // the same employee and month overwrites an earlier one, as before.
+  if (valid.length > 0) {
     try {
-      const result = await upsertEmployeeAndSalaryData(payload);
-      if (result.isNewSalaryRecord) newRecords += 1;
-      else updatedRecords += 1;
+      const results = await upsertRecords(valid.map((v) => v.payload));
+      results.forEach((result, idx) => {
+        if (result.status === 'inserted') newRecords += 1;
+        else if (result.status === 'updated') updatedRecords += 1;
+        else {
+          failedRecords += 1;
+          errors.push({
+            row: valid[idx].rowNumber,
+            employeeId: valid[idx].payload.employee_id,
+            message: result.error || `Not saved (${result.status})`,
+          });
+        }
+      });
     } catch (err) {
-      failedRecords += 1;
-      errors.push({ row: rowNumber, employeeId: payload.employee_id, message: err.message });
+      failedRecords += valid.length;
+      errors.push({ row: 0, employeeId: '', message: `No rows were saved to the Google Sheet: ${err.message}` });
     }
   }
 

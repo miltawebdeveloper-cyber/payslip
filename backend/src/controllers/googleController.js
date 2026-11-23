@@ -1,71 +1,46 @@
 const catchAsync = require('../middleware/catchAsync');
-const { SalaryData, Employee } = require('../models');
-const {
-  isGoogleConfigured,
-  getAuthType,
-  generateOAuthUrl,
-  exchangeCodeForTokens,
-} = require('../config/googleConfig');
-const { getGoogleSheetStatus, syncAllRecordsToGoogleSheet } = require('../services/googleSheetsService');
-const { getDriveStatus } = require('../services/googleDriveService');
+const { generateOAuthUrl, exchangeCodeForTokens } = require('../config/googleConfig');
+const googleAppsScript = require('../services/googleAppsScriptService');
 
 /**
- * Returns overall Google integration status, sheet links, and drive folder links.
+ * Links to the Google Sheet (the app's data store) and the Drive folders.
+ * Never fails the request: a Google problem is reported in `error`.
  */
 const getStatus = catchAsync(async (req, res) => {
-  const configured = isGoogleConfigured();
-  const authType = getAuthType();
-
-  if (!configured) {
+  if (!googleAppsScript.isAppsScriptConfigured()) {
     return res.json({
       configured: false,
-      authType,
-      message: 'Google integration is not yet fully configured. Set up OAuth2 or Service Account in environment variables.',
+      authType: null,
+      message: 'Set GOOGLE_APPS_SCRIPT_URL to the Apps Script Web App URL. Salary records are stored in its Google Sheet.',
     });
   }
 
-  const [sheetStatus, driveStatus] = await Promise.all([
-    getGoogleSheetStatus(),
-    getDriveStatus(),
-  ]);
-
-  res.json({
-    configured: true,
-    authType,
-    sheet: sheetStatus,
-    drive: driveStatus,
-  });
-});
-
-/**
- * Manually trigger full synchronization of all PostgreSQL salary records to Google Sheets.
- */
-const syncSheet = catchAsync(async (req, res) => {
-  if (!isGoogleConfigured()) {
-    return res.status(400).json({
-      success: false,
-      message: 'Google account is not configured. Please set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN.',
+  try {
+    const status = await googleAppsScript.getStatus();
+    res.json({
+      configured: true,
+      authType: 'apps_script',
+      sheet: {
+        configured: true,
+        sheetUrl: status.sheetUrl,
+        spreadsheetId: status.sheetId,
+        sheetTitle: googleAppsScript.sheetParams().sheetTitle,
+      },
+      drive: {
+        configured: true,
+        mainFolder: {
+          id: status.folderId,
+          name: status.folderName,
+          webViewLink: status.folderUrl,
+        },
+        payslipsFolder: {
+          webViewLink: status.payslipsFolderUrl || status.folderUrl,
+        },
+      },
     });
+  } catch (err) {
+    res.json({ configured: true, authType: 'apps_script', error: err.message });
   }
-
-  const allRecords = await SalaryData.findAll({
-    include: [{ model: Employee, as: 'employee', required: true }],
-    order: [
-      ['year', 'DESC'],
-      ['month', 'DESC'],
-      [{ model: Employee, as: 'employee' }, 'employee_name', 'ASC'],
-    ],
-  });
-
-  const syncResult = await syncAllRecordsToGoogleSheet(allRecords);
-
-  res.json({
-    success: syncResult.success,
-    totalRecords: allRecords.length,
-    spreadsheetId: syncResult.spreadsheetId,
-    sheetUrl: syncResult.sheetUrl,
-    message: `Successfully synchronized ${allRecords.length} records to Google Sheet.`,
-  });
 });
 
 /**
@@ -105,7 +80,6 @@ const oauthCallback = catchAsync(async (req, res) => {
 
 module.exports = {
   getStatus,
-  syncSheet,
   getAuthUrl,
   oauthCallback,
 };

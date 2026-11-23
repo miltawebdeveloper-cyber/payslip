@@ -9,7 +9,6 @@ import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded';
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded';
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
 import FilterAltOffOutlinedIcon from '@mui/icons-material/FilterAltOffOutlined';
-import SyncRoundedIcon from '@mui/icons-material/SyncRounded';
 import OpenInNewRoundedIcon from '@mui/icons-material/OpenInNewRounded';
 import PageHeader from '../components/PageHeader.jsx';
 import SalaryDataTable from '../components/SalaryDataTable.jsx';
@@ -25,7 +24,7 @@ import {
   fetchSalaryData, createSalaryRow, updateSalaryRow, deleteSalaryRow,
   fetchSelectionSummary, bulkDeleteSalaryRows,
 } from '../api/salaryDataApi.js';
-import { fetchGoogleStatus, syncGoogleSheet } from '../api/googleApi.js';
+import { fetchGoogleStatus } from '../api/googleApi.js';
 import { BRAND } from '../theme.js';
 
 const SEARCH_DEBOUNCE_MS = 300;
@@ -74,7 +73,6 @@ export default function SalaryDataPage() {
 
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [googleStatus, setGoogleStatus] = useState(null);
-  const [syncingSheet, setSyncingSheet] = useState(false);
 
   const notify = (message, severity = 'success') => setSnackbar({ open: true, message, severity });
 
@@ -86,19 +84,6 @@ export default function SalaryDataPage() {
       // Google integration optional / pending config
     }
   }, []);
-
-  const handleSyncGoogleSheet = async () => {
-    setSyncingSheet(true);
-    try {
-      const res = await syncGoogleSheet();
-      notify(res.message || 'Google Sheet synchronized successfully');
-      loadGoogleStatus();
-    } catch (err) {
-      notify(err.response?.data?.message || 'Failed to sync Google Sheet', 'error');
-    } finally {
-      setSyncingSheet(false);
-    }
-  };
 
   useEffect(() => {
     loadGoogleStatus();
@@ -414,34 +399,6 @@ export default function SalaryDataPage() {
                 <RefreshRoundedIcon fontSize="small" />
               </IconButton>
             </Tooltip>
-            {googleStatus?.configured && (
-              <Tooltip title={syncingSheet ? 'Syncing to Google Sheet...' : 'Sync PostgreSQL to Google Sheet'}>
-                <span>
-                  <IconButton
-                    onClick={handleSyncGoogleSheet}
-                    disabled={syncingSheet}
-                    aria-label="Sync with Google Sheet"
-                    sx={{
-                      border: `1px solid ${BRAND.line}`,
-                      width: 32,
-                      height: 32,
-                      color: '#0F9D58',
-                    }}
-                  >
-                    <SyncRoundedIcon
-                      fontSize="small"
-                      sx={{
-                        animation: syncingSheet ? 'spin 1s linear infinite' : 'none',
-                        '@keyframes spin': {
-                          '0%': { transform: 'rotate(0deg)' },
-                          '100%': { transform: 'rotate(360deg)' },
-                        },
-                      }}
-                    />
-                  </IconButton>
-                </span>
-              </Tooltip>
-            )}
           </Box>
         </Box>
 

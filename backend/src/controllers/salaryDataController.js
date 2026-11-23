@@ -1,36 +1,31 @@
-const { Op } = require('sequelize');
-const { Employee, SalaryData } = require('../models');
 const catchAsync = require('../middleware/catchAsync');
-const { upsertEmployeeAndSalaryData } = require('../services/salaryRecordService');
+const { normalizeSalaryPayload } = require('../services/salaryRecordService');
+const store = require('../services/salaryStore');
 const { importSalaryDataFromExcel, generateTemplateWorkbook } = require('../services/excelImportService');
 const { calculatePayslip, round2 } = require('../services/payrollCalculationService');
-const {
-  upsertRecordInGoogleSheet,
-  deleteRecordFromGoogleSheet,
-  syncAllRecordsToGoogleSheet,
-} = require('../services/googleSheetsService');
 
 /**
- * Builds the where/include for the table's search and filters. Shared by the
- * list endpoint and the "all matching records" bulk selection, so selecting
- * everything always means exactly the rows the table would page through.
+ * The table's search and filters. Shared by the list endpoint and the "all
+ * matching records" bulk selection, so selecting everything always means
+ * exactly the rows the table would page through.
  */
-function buildListQuery({ search, month, year, payrollType } = {}) {
-  const where = {};
-  if (month) where.month = parseInt(month, 10);
-  if (year) where.year = parseInt(year, 10);
-  if (payrollType) where.payroll_type = payrollType;
-
-  const employeeWhere = {};
+function matchesFilters(record, { search, month, year, payrollType } = {}) {
+  if (month && record.month !== parseInt(month, 10)) return false;
+  if (year && record.year !== parseInt(year, 10)) return false;
+  if (payrollType && record.payroll_type !== payrollType) return false;
   if (search) {
-    employeeWhere[Op.or] = [
-      { employee_name: { [Op.iLike]: `%${search}%` } },
-      { employee_id: { [Op.iLike]: `%${search}%` } },
-      { designation: { [Op.iLike]: `%${search}%` } },
-    ];
+    const needle = String(search).trim().toLowerCase();
+    const haystack = [record.employee_name, record.employee_id, record.designation];
+    if (!haystack.some((value) => String(value || '').toLowerCase().includes(needle))) return false;
   }
+  return true;
+}
 
-  return { where, include: [{ model: Employee, as: 'employee', where: employeeWhere, required: true }] };
+/** Newest month first, then employee name A-Z. */
+function byPeriodThenName(a, b) {
+  return (b.year - a.year)
+    || (b.month - a.month)
+    || String(a.employee_name).localeCompare(String(b.employee_name), 'en', { sensitivity: 'base' });
 }
 
 /**
@@ -41,152 +36,79 @@ function buildListQuery({ search, month, year, payrollType } = {}) {
  */
 async function findSelectedRows(body = {}) {
   if (body.allMatching === true) {
-    return SalaryData.findAll(buildListQuery(body.filters));
+    const records = await store.listRecords();
+    return records.filter((record) => matchesFilters(record, body.filters));
   }
   const ids = Array.isArray(body.ids)
-    ? body.ids.map((id) => parseInt(id, 10)).filter((id) => id > 0)
-    : [];
-  if (ids.length === 0) return null;
-  return SalaryData.findAll({
-    where: { id: ids },
-    include: [{ model: Employee, as: 'employee', required: true }],
-  });
+    ? new Set(body.ids.map((id) => String(id).toLowerCase()))
+    : new Set();
+  if (ids.size === 0) return null;
+  const records = await store.listRecords();
+  return records.filter((record) => ids.has(record.id.toLowerCase()));
 }
 
-function serializeRow(salaryData) {
-  const employee = salaryData.employee;
-  return {
-    id: salaryData.id,
-    employee_id: employee.employee_id,
-    employee_name: employee.employee_name,
-    designation: employee.designation,
-    date_of_joining: employee.date_of_joining,
-    bank_name: employee.bank_name,
-    bank_account_number: employee.bank_account_number,
-    pan: employee.pan,
-    esic_no: employee.esic_no,
-    uan_no: employee.uan_no,
-    month: salaryData.month,
-    year: salaryData.year,
-    month_days: salaryData.month_days,
-    paid_days: salaryData.paid_days,
-    payroll_type: salaryData.payroll_type,
-    basic: salaryData.basic,
-    hra: salaryData.hra,
-    conveyance_allowances: salaryData.conveyance_allowances,
-    medical_allowances: salaryData.medical_allowances,
-    special_allowances: salaryData.special_allowances,
-    night_shift_allowances: salaryData.night_shift_allowances,
-    other_earnings: salaryData.other_earnings,
-    pf_employee: salaryData.pf_employee,
-    esic_employee: salaryData.esic_employee,
-    other_deductions: salaryData.other_deductions,
-    created_at: salaryData.created_at,
-    updated_at: salaryData.updated_at,
-  };
+function requireKey(id) {
+  const key = store.parseRecordId(id);
+  if (!key) {
+    const err = new Error('Salary data record not found');
+    err.statusCode = 404;
+    throw err;
+  }
+  return key;
 }
 
 const list = catchAsync(async (req, res) => {
   const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 200);
 
-  const { rows, count } = await SalaryData.findAndCountAll({
-    ...buildListQuery(req.query),
-    order: [
-      ['year', 'DESC'],
-      ['month', 'DESC'],
-      [{ model: Employee, as: 'employee' }, 'employee_name', 'ASC'],
-    ],
-    limit,
-    offset: (page - 1) * limit,
-  });
+  const records = (await store.listRecords())
+    .filter((record) => matchesFilters(record, req.query))
+    .sort(byPeriodThenName);
 
   res.json({
-    data: rows.map(serializeRow),
-    total: count,
+    data: records.slice((page - 1) * limit, page * limit),
+    total: records.length,
     page,
     limit,
-    totalPages: Math.max(Math.ceil(count / limit), 1),
+    totalPages: Math.max(Math.ceil(records.length / limit), 1),
   });
 });
 
+/** The employee's details from their latest month, to pre-fill a new row. */
 const lookupEmployee = catchAsync(async (req, res) => {
-  const employee = await Employee.findOne({ where: { employee_id: req.params.employeeId } });
-  if (!employee) return res.status(404).json({ message: 'No existing employee with this ID' });
+  const latest = (await store.listRecords())
+    .filter((record) => store.sameEmployee(record.employee_id, req.params.employeeId))
+    .sort(byPeriodThenName)[0];
+  if (!latest) return res.status(404).json({ message: 'No existing employee with this ID' });
   res.json({
-    employee_id: employee.employee_id,
-    employee_name: employee.employee_name,
-    designation: employee.designation,
-    date_of_joining: employee.date_of_joining,
-    bank_name: employee.bank_name,
-    bank_account_number: employee.bank_account_number,
-    pan: employee.pan,
-    esic_no: employee.esic_no,
-    uan_no: employee.uan_no,
+    employee_id: latest.employee_id,
+    employee_name: latest.employee_name,
+    designation: latest.designation,
+    date_of_joining: latest.date_of_joining,
+    bank_name: latest.bank_name,
+    bank_account_number: latest.bank_account_number,
+    pan: latest.pan,
+    esic_no: latest.esic_no,
+    uan_no: latest.uan_no,
   });
 });
 
 const create = catchAsync(async (req, res) => {
-  const payload = req.body;
-
-  const employee = await Employee.findOne({ where: { employee_id: payload.employee_id } });
-  if (employee) {
-    const existing = await SalaryData.findOne({
-      where: { employee_id: employee.id, month: payload.month, year: payload.year },
-    });
-    if (existing) {
-      return res.status(409).json({
-        message: 'A salary record already exists for this employee and month. Edit it instead of adding a new row.',
-      });
-    }
-  }
-
-  const { salaryData } = await upsertEmployeeAndSalaryData(payload);
-  const created = await SalaryData.findByPk(salaryData.id, { include: [{ model: Employee, as: 'employee' }] });
-
-  // Continuously maintain Google Sheet
-  upsertRecordInGoogleSheet(created).catch((err) => {
-    // eslint-disable-next-line no-console
-    console.warn('Google Sheet sync failed on create:', err.message);
-  });
-
-  res.status(201).json(serializeRow(created));
+  const payload = normalizeSalaryPayload(req.body);
+  res.status(201).json(await store.createRecord(payload));
 });
 
 const update = catchAsync(async (req, res) => {
-  const existing = await SalaryData.findByPk(req.params.id, { include: [{ model: Employee, as: 'employee' }] });
-  if (!existing) return res.status(404).json({ message: 'Salary data record not found' });
-
-  const payload = { ...req.body, employee_id: existing.employee.employee_id };
-  const { salaryData } = await upsertEmployeeAndSalaryData(payload);
-  const updated = await SalaryData.findByPk(salaryData.id, { include: [{ model: Employee, as: 'employee' }] });
-
-  // Continuously maintain Google Sheet
-  upsertRecordInGoogleSheet(updated).catch((err) => {
-    // eslint-disable-next-line no-console
-    console.warn('Google Sheet sync failed on update:', err.message);
-  });
-
-  res.json(serializeRow(updated));
+  const key = requireKey(req.params.id);
+  // The Employee ID can't be changed on edit; the month and year can.
+  const payload = normalizeSalaryPayload({ ...req.body, employee_id: key.employeeId });
+  res.json(await store.updateRecord(key, payload));
 });
 
 const remove = catchAsync(async (req, res) => {
-  const existing = await SalaryData.findByPk(req.params.id, { include: [{ model: Employee, as: 'employee' }] });
-  if (!existing) return res.status(404).json({ message: 'Salary data record not found' });
-
-  const empId = existing.employee?.employee_id;
-  const { month, year } = existing;
-
-  await existing.destroy();
-
-  // Continuously maintain Google Sheet
-  if (empId) {
-    deleteRecordFromGoogleSheet(empId, month, year).catch((err) => {
-      // eslint-disable-next-line no-console
-      console.warn('Google Sheet sync failed on remove:', err.message);
-    });
-  }
-
+  const key = requireKey(req.params.id);
+  const deleted = await store.deleteRecords([key]);
+  if (deleted === 0) return res.status(404).json({ message: 'Salary data record not found' });
   res.status(204).send();
 });
 
@@ -204,7 +126,7 @@ const selectionSummary = catchAsync(async (req, res) => {
 
   res.json({
     count: rows.length,
-    employees: new Set(rows.map((row) => row.employee_id)).size,
+    employees: new Set(rows.map((row) => row.employee_id.toLowerCase())).size,
     grossEarnings: round2(totals.grossEarnings),
     grossDeductions: round2(totals.grossDeductions),
     netPay: round2(totals.netPay),
@@ -214,48 +136,13 @@ const selectionSummary = catchAsync(async (req, res) => {
 const bulkRemove = catchAsync(async (req, res) => {
   const rows = await findSelectedRows(req.body);
   if (!rows) return res.status(400).json({ message: 'Select at least one record to delete' });
-
-  const ids = rows.map((row) => row.id);
-  const deleted = ids.length > 0 ? await SalaryData.destroy({ where: { id: ids } }) : 0;
-
-  // Continuously maintain Google Sheet: resync with remaining records
-  SalaryData.findAll({
-    include: [{ model: Employee, as: 'employee', required: true }],
-    order: [
-      ['year', 'DESC'],
-      ['month', 'DESC'],
-      [{ model: Employee, as: 'employee' }, 'employee_name', 'ASC'],
-    ],
-  })
-    .then((remaining) => syncAllRecordsToGoogleSheet(remaining))
-    .catch((err) => {
-      // eslint-disable-next-line no-console
-      console.warn('Google Sheet sync after bulk remove failed:', err.message);
-    });
-
+  const deleted = await store.deleteRecords(rows.map(store.keyOf));
   res.json({ deleted });
 });
 
 const importExcel = catchAsync(async (req, res) => {
   if (!req.file) return res.status(400).json({ message: 'No file was uploaded' });
-  const summary = await importSalaryDataFromExcel(req.file.buffer);
-
-  // Automatically store and maintain all records in Google Sheet after importing
-  SalaryData.findAll({
-    include: [{ model: Employee, as: 'employee', required: true }],
-    order: [
-      ['year', 'DESC'],
-      ['month', 'DESC'],
-      [{ model: Employee, as: 'employee' }, 'employee_name', 'ASC'],
-    ],
-  })
-    .then((allRecords) => syncAllRecordsToGoogleSheet(allRecords))
-    .catch((err) => {
-      // eslint-disable-next-line no-console
-      console.warn('Google Sheet sync after Excel import failed:', err.message);
-    });
-
-  res.json(summary);
+  res.json(await importSalaryDataFromExcel(req.file.buffer));
 });
 
 const downloadTemplate = catchAsync(async (req, res) => {

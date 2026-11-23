@@ -1,93 +1,135 @@
 /**
  * Google Apps Script Web App for Payslip Generator
- * 
- * NO Google Cloud setup required!
- * Runs directly inside your personal Google Account.
- * 
- * Steps to deploy:
- * 1. Go to https://script.google.com/
- * 2. Click "New project"
- * 3. Replace all code in the editor with this script
- * 4. Click "Deploy" > "New deployment"
- * 5. Click the gear icon (Select type) > Choose "Web app"
- * 6. Set:
- *    - Execute as: "Me" (your email)
- *    - Who has access: "Anyone"
- * 7. Click "Deploy", authorize access, and copy the "Web app URL"
- * 8. Add that URL to your backend/.env as:
+ *
+ * The "Salary Records" sheet is the app's only data store: the backend
+ * lists, adds, edits and deletes salary records through this script, and
+ * saves payslip PDFs to Drive through it. There is no database.
+ *
+ * Deploy (first time):
+ * 1. Go to https://script.google.com/ and click "New project".
+ * 2. Replace all code in the editor with this file and save.
+ * 3. Deploy > New deployment > gear icon > "Web app".
+ * 4. Execute as: "Me". Who has access: "Anyone".
+ * 5. Deploy, authorize access, and copy the "Web app URL" into backend/.env:
  *    GOOGLE_APPS_SCRIPT_URL=https://script.google.com/macros/s/.../exec
+ *
+ * After changing this file: Deploy > Manage deployments > edit (pencil) >
+ * Version: "New version" > Deploy. The URL stays the same.
+ *
+ * Recommended: anyone with the URL can call it, so protect the salary data
+ * with a key. Project Settings > Script Properties > add API_KEY = <a long
+ * random value>, and set GOOGLE_APPS_SCRIPT_KEY to the same value in the
+ * backend's environment.
+ *
+ * Sheet layout: row 1 holds the headers below, in this order, and every
+ * row under it is one employee's salary for one month (Employee ID + Month
+ * + Year is unique). The app owns these columns: don't rename, reorder or
+ * put formulas in them. Columns added to the right of "Last Updated" are
+ * left alone.
  */
 
-const HEADERS = [
-  'Employee ID',
-  'Employee Name',
-  'Designation',
-  'Date of Joining',
-  'Bank Name',
-  'Bank Account Number',
-  'PAN',
-  'ESIC No',
-  'UAN No',
-  'Month',
-  'Year',
-  'Month Days',
-  'Paid Days',
-  'Payroll Type',
-  'Basic',
-  'HRA',
-  'Conveyance Allowances',
-  'Medical Allowances',
-  'Special Allowances',
-  'Night Shift Allowances',
-  'Other Earnings',
-  'PF Employee',
-  'ESIC Employee',
-  'Other Deductions',
-  'Gross Earnings',
-  'Gross Deductions',
-  'Net Pay',
-  'Last Updated'
+const SHEET_NAME = 'Salary Records';
+const DEFAULT_SHEET_TITLE = 'Payslip Generator - Salary Records';
+const MONEY_FORMAT = '#,##0.00';
+
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+
+const PAYROLL_TYPE_LABELS = {
+  PF_ESI: 'PF + ESI',
+  PF_ONLY: 'PF Only',
+  NO_DEDUCTION: 'No Deduction'
+};
+
+// text: stored as plain text so values like "000123" or "2025-04-01" are
+// kept exactly as written. format: number format for numeric columns.
+const COLUMNS = [
+  { header: 'Employee ID', field: 'employee_id', text: true },
+  { header: 'Employee Name', field: 'employee_name', text: true },
+  { header: 'Designation', field: 'designation', text: true },
+  { header: 'Date of Joining', field: 'date_of_joining', text: true },
+  { header: 'Bank Name', field: 'bank_name', text: true },
+  { header: 'Bank Account Number', field: 'bank_account_number', text: true },
+  { header: 'PAN', field: 'pan', text: true },
+  { header: 'ESIC No', field: 'esic_no', text: true },
+  { header: 'UAN No', field: 'uan_no', text: true },
+  { header: 'Month', field: 'month', text: true },
+  { header: 'Year', field: 'year' },
+  { header: 'Month Days', field: 'month_days' },
+  { header: 'Paid Days', field: 'paid_days' },
+  { header: 'Payroll Type', field: 'payroll_type', text: true },
+  { header: 'Basic', field: 'basic', format: MONEY_FORMAT },
+  { header: 'HRA', field: 'hra', format: MONEY_FORMAT },
+  { header: 'Conveyance Allowances', field: 'conveyance_allowances', format: MONEY_FORMAT },
+  { header: 'Medical Allowances', field: 'medical_allowances', format: MONEY_FORMAT },
+  { header: 'Special Allowances', field: 'special_allowances', format: MONEY_FORMAT },
+  { header: 'Night Shift Allowances', field: 'night_shift_allowances', format: MONEY_FORMAT },
+  { header: 'Other Earnings', field: 'other_earnings', format: MONEY_FORMAT },
+  { header: 'PF Employee', field: 'pf_employee', format: MONEY_FORMAT },
+  { header: 'ESIC Employee', field: 'esic_employee', format: MONEY_FORMAT },
+  { header: 'Other Deductions', field: 'other_deductions', format: MONEY_FORMAT },
+  { header: 'Gross Earnings', field: 'gross_earnings', format: MONEY_FORMAT },
+  { header: 'Gross Deductions', field: 'gross_deductions', format: MONEY_FORMAT },
+  { header: 'Net Pay', field: 'net_pay', format: MONEY_FORMAT },
+  { header: 'Last Updated', field: 'last_updated', text: true }
+];
+
+const HEADERS = COLUMNS.map(function (c) { return c.header; });
+const COL = {};
+COLUMNS.forEach(function (c, i) { COL[c.field] = i; });
+
+// Employee details are shared by all of an employee's months: saving any
+// row refreshes these columns on that employee's other rows too.
+const EMPLOYEE_DETAIL_FIELDS = [
+  'employee_name', 'designation', 'date_of_joining', 'bank_name',
+  'bank_account_number', 'pan', 'esic_no', 'uan_no'
 ];
 
 function doPost(e) {
   try {
     const data = JSON.parse(e.postData.contents);
-    const action = data.action;
-    let result = {};
-
-    if (action === 'getStatus') {
-      result = handleGetStatus(data);
-    } else if (action === 'syncSheet') {
-      result = handleSyncSheet(data);
-    } else if (action === 'upsertRecord') {
-      result = handleUpsertRecord(data);
-    } else if (action === 'deleteRecord') {
-      result = handleDeleteRecord(data);
-    } else if (action === 'uploadPdf') {
-      result = handleUploadPdf(data);
-    } else {
-      result = { success: false, error: 'Unknown action: ' + action };
+    // Optional shared key: set API_KEY in Project Settings > Script Properties
+    // and the same value as GOOGLE_APPS_SCRIPT_KEY in the backend's env.
+    const requiredKey = PropertiesService.getScriptProperties().getProperty('API_KEY');
+    if (requiredKey && data.apiKey !== requiredKey) {
+      return jsonOutput({ success: false, error: 'Unauthorized: API key missing or wrong' });
     }
-
-    return ContentService.createTextOutput(JSON.stringify(result))
-      .setMimeType(ContentService.MimeType.JSON);
+    const handlers = {
+      getStatus: handleGetStatus,
+      listRecords: handleListRecords,
+      upsertRecords: handleUpsertRecords,
+      deleteRecords: handleDeleteRecords,
+      uploadPdf: handleUploadPdf
+    };
+    const handler = handlers[data.action];
+    const result = handler
+      ? handler(data)
+      : { success: false, error: 'Unknown action: ' + data.action };
+    return jsonOutput(result);
   } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({ success: false, error: err.toString() }))
-      .setMimeType(ContentService.MimeType.JSON);
+    return jsonOutput({ success: false, error: String(err && err.message ? err.message : err) });
   }
 }
 
-function doGet(e) {
-  return ContentService.createTextOutput(JSON.stringify({ status: 'ok', name: 'Payslip Generator Google Apps Script API' }))
+function doGet() {
+  return jsonOutput({ status: 'ok', name: 'Payslip Generator Google Apps Script API' });
+}
+
+function jsonOutput(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
 }
+
+// ---------------------------------------------------------------- Drive
 
 function getFolder(folderId) {
   if (folderId) {
     try {
       return DriveApp.getFolderById(folderId);
     } catch (e) {
-      // folder not found
+      // fall through to the folder looked up by name
     }
   }
   const folders = DriveApp.getFoldersByName('Payslip Generator');
@@ -104,163 +146,289 @@ function getOrCreateSubfolder(parentFolder, name) {
 function getOrCreateSpreadsheet(folder, sheetTitle) {
   const files = folder.getFilesByName(sheetTitle);
   if (files.hasNext()) {
-    const file = files.next();
-    return SpreadsheetApp.openById(file.getId());
+    return SpreadsheetApp.openById(files.next().getId());
   }
-
-  // Create new Spreadsheet
   const ss = SpreadsheetApp.create(sheetTitle);
-  const file = DriveApp.getFileById(ss.getId());
-  file.moveTo(folder);
-
-  const sheet = ss.getActiveSheet();
-  sheet.setName('Salary Records');
-  sheet.appendRow(HEADERS);
-  formatHeaderRow(sheet);
-
+  DriveApp.getFileById(ss.getId()).moveTo(folder);
+  ss.getSheets()[0].setName(SHEET_NAME);
   return ss;
 }
 
-function formatHeaderRow(sheet) {
-  const headerRange = sheet.getRange(1, 1, 1, HEADERS.length);
-  headerRange.setBackground('#1F3873');
-  headerRange.setFontColor('#FFFFFF');
-  headerRange.setFontWeight('bold');
-  headerRange.setHorizontalAlignment('center');
-  sheet.setFrozenRows(1);
+// ---------------------------------------------------------------- Sheet
+
+function openRecordsSheet(data) {
+  const folder = getFolder(data.folderId);
+  const ss = getOrCreateSpreadsheet(folder, data.sheetTitle || DEFAULT_SHEET_TITLE);
+  const sheet = ss.getSheetByName(SHEET_NAME) || ss.getSheets()[0];
+  ensureHeaders(sheet);
+  return { ss: ss, sheet: sheet, tz: ss.getSpreadsheetTimeZone() };
 }
 
-function recordToRow(r) {
-  return [
-    r.employee_id || '',
-    r.employee_name || '',
-    r.designation || '',
-    r.date_of_joining || '',
-    r.bank_name || '',
-    r.bank_account_number || '',
-    r.pan || '',
-    r.esic_no || '',
-    r.uan_no || '',
-    r.month || '',
-    r.year || '',
-    r.month_days !== undefined ? r.month_days : '',
-    r.paid_days !== undefined ? r.paid_days : '',
-    r.payroll_type || '',
-    r.basic || 0,
-    r.hra || 0,
-    r.conveyance_allowances || 0,
-    r.medical_allowances || 0,
-    r.special_allowances || 0,
-    r.night_shift_allowances || 0,
-    r.other_earnings || 0,
-    r.pf_employee || 0,
-    r.esic_employee || 0,
-    r.other_deductions || 0,
-    r.grossEarnings || 0,
-    r.grossDeductions || 0,
-    r.netPay || 0,
-    r.lastUpdated || new Date().toISOString()
-  ];
+/** getRange can't reach past the sheet's size, so grow it first (a new sheet has 26 columns). */
+function ensureSize(sheet, rows, cols) {
+  if (sheet.getMaxRows() < rows) sheet.insertRowsAfter(sheet.getMaxRows(), rows - sheet.getMaxRows());
+  if (sheet.getMaxColumns() < cols) sheet.insertColumnsAfter(sheet.getMaxColumns(), cols - sheet.getMaxColumns());
 }
+
+function ensureHeaders(sheet) {
+  ensureSize(sheet, 1, HEADERS.length);
+  if (sheet.getLastRow() === 0) {
+    const headerRange = sheet.getRange(1, 1, 1, HEADERS.length);
+    headerRange.setValues([HEADERS]);
+    headerRange.setBackground('#1F3873');
+    headerRange.setFontColor('#FFFFFF');
+    headerRange.setFontWeight('bold');
+    headerRange.setHorizontalAlignment('center');
+    sheet.setFrozenRows(1);
+    return;
+  }
+  const actual = sheet.getRange(1, 1, 1, HEADERS.length).getDisplayValues()[0];
+  for (let i = 0; i < HEADERS.length; i++) {
+    if (String(actual[i]).trim().toLowerCase() !== HEADERS[i].toLowerCase()) {
+      throw new Error(
+        'Sheet "' + sheet.getName() + '" has "' + actual[i] + '" in column ' + (i + 1)
+        + ' of the header row where "' + HEADERS[i] + '" is expected. Restore row 1 to: '
+        + HEADERS.join(', ')
+      );
+    }
+  }
+}
+
+function cellToText(value, tz) {
+  if (value === null || value === undefined) return '';
+  if (value instanceof Date) return Utilities.formatDate(value, tz, 'yyyy-MM-dd');
+  return String(value);
+}
+
+/**
+ * All data rows (row 2 down) for the app's columns. Blank rows are kept so
+ * index i is always sheet row i + 2. Text columns come back as strings.
+ */
+function readRows(sheet, tz) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  const values = sheet.getRange(2, 1, lastRow - 1, HEADERS.length).getValues();
+  return values.map(function (row) {
+    return row.map(function (value, i) {
+      if (i === COL.month) {
+        const m = parseMonth(value);
+        return m ? MONTH_NAMES[m - 1] : cellToText(value, tz);
+      }
+      return COLUMNS[i].text ? cellToText(value, tz) : value;
+    });
+  });
+}
+
+/** Writes rows back from row 2 down, text formats first so "000123" stays text. */
+function writeRows(sheet, rows) {
+  if (rows.length === 0) return;
+  ensureSize(sheet, rows.length + 1, HEADERS.length);
+  COLUMNS.forEach(function (col, i) {
+    const format = col.text ? '@' : col.format;
+    if (format) sheet.getRange(2, i + 1, rows.length, 1).setNumberFormat(format);
+  });
+  sheet.getRange(2, 1, rows.length, HEADERS.length).setValues(rows);
+}
+
+function normId(value) {
+  return String(value === null || value === undefined ? '' : value).trim().toLowerCase();
+}
+
+function parseMonth(value) {
+  if (value instanceof Date) return value.getMonth() + 1;
+  if (typeof value === 'number') return value >= 1 && value <= 12 && value % 1 === 0 ? value : null;
+  const s = String(value === null || value === undefined ? '' : value).trim().toLowerCase();
+  if (!s) return null;
+  const inParens = s.match(/\((\d{1,2})\)/);
+  const digits = inParens ? inParens[1] : (/^\d{1,2}$/.test(s) ? s : null);
+  if (digits) {
+    const n = parseInt(digits, 10);
+    return n >= 1 && n <= 12 ? n : null;
+  }
+  const letters = s.replace(/[^a-z]/g, '');
+  for (let i = 0; i < 12; i++) {
+    const name = MONTH_NAMES[i].toLowerCase();
+    if (letters === name || letters === name.slice(0, 3)) return i + 1;
+  }
+  return null;
+}
+
+function parseYear(value) {
+  if (value instanceof Date) return value.getFullYear();
+  const n = parseInt(value, 10);
+  return n > 0 ? n : null;
+}
+
+function keyOf(employeeId, year, month) {
+  const id = normId(employeeId);
+  const y = parseYear(year);
+  const m = parseMonth(month);
+  return id && y && m ? id + '|' + y + '|' + m : '';
+}
+
+function rowKey(row) {
+  return keyOf(row[COL.employee_id], row[COL.year], row[COL.month]);
+}
+
+function recordToRow(r, now) {
+  return COLUMNS.map(function (col) {
+    if (col.field === 'month') {
+      const m = parseMonth(r.month);
+      return m ? MONTH_NAMES[m - 1] : '';
+    }
+    if (col.field === 'payroll_type') return PAYROLL_TYPE_LABELS[r.payroll_type] || r.payroll_type || '';
+    if (col.field === 'last_updated') return now;
+    const value = r[col.field];
+    if (value === null || value === undefined || value === '') return '';
+    return col.text ? String(value) : Number(value);
+  });
+}
+
+function rowToRecord(row, rowNumber) {
+  const record = { _row: rowNumber };
+  COLUMNS.forEach(function (col, i) { record[col.field] = row[i]; });
+  record.month = parseMonth(row[COL.month]);
+  record.year = parseYear(row[COL.year]);
+  return record;
+}
+
+function withLock(fn) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    return fn();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// -------------------------------------------------------------- Actions
 
 function handleGetStatus(data) {
+  const ctx = openRecordsSheet(data);
   const folder = getFolder(data.folderId);
-  const ss = getOrCreateSpreadsheet(folder, data.sheetTitle || 'Payslip Generator - Salary Records');
   const payslipsFolder = getOrCreateSubfolder(folder, 'Payslips');
-
   return {
     configured: true,
     folderId: folder.getId(),
     folderName: folder.getName(),
     folderUrl: folder.getUrl(),
-    sheetId: ss.getId(),
-    sheetUrl: ss.getUrl(),
-    payslipsFolderUrl: payslipsFolder.getUrl(),
+    sheetId: ctx.ss.getId(),
+    sheetUrl: ctx.ss.getUrl(),
+    payslipsFolderUrl: payslipsFolder.getUrl()
   };
 }
 
-function handleSyncSheet(data) {
-  const folder = getFolder(data.folderId);
-  const ss = getOrCreateSpreadsheet(folder, data.sheetTitle || 'Payslip Generator - Salary Records');
-  const sheet = ss.getSheetByName('Salary Records') || ss.getActiveSheet();
-
-  sheet.clear();
-  sheet.appendRow(HEADERS);
-  formatHeaderRow(sheet);
-
-  const records = data.records || [];
-  if (records.length > 0) {
-    const rows = records.map(recordToRow);
-    sheet.getRange(2, 1, rows.length, HEADERS.length).setValues(rows);
-  }
-
-  return {
-    success: true,
-    totalRows: records.length,
-    sheetUrl: ss.getUrl(),
-    sheetId: ss.getId()
-  };
+function handleListRecords(data) {
+  const ctx = openRecordsSheet(data);
+  const records = [];
+  readRows(ctx.sheet, ctx.tz).forEach(function (row, i) {
+    if (normId(row[COL.employee_id])) records.push(rowToRecord(row, i + 2));
+  });
+  return { success: true, records: records, sheetUrl: ctx.ss.getUrl() };
 }
 
-function handleUpsertRecord(data) {
-  const folder = getFolder(data.folderId);
-  const ss = getOrCreateSpreadsheet(folder, data.sheetTitle || 'Payslip Generator - Salary Records');
-  const sheet = ss.getSheetByName('Salary Records') || ss.getActiveSheet();
+/**
+ * data.items: [{ record, matchKey?, mustExist?, mustNotExist? }]
+ *   record      the full record to save (month as a number, payroll_type as a code)
+ *   matchKey    { employeeId, year, month } of the row to overwrite, when it
+ *               differs from the record's own key (an edit that moves the month)
+ *   mustExist   fail with "not_found" unless the matched row exists
+ *   mustNotExist fail with "conflict" if the record's row already exists
+ * Returns one { status: inserted | updated | conflict | not_found } per item.
+ */
+function handleUpsertRecords(data) {
+  return withLock(function () {
+    const ctx = openRecordsSheet(data);
+    const rows = readRows(ctx.sheet, ctx.tz);
+    const index = {};
+    rows.forEach(function (row, i) {
+      const k = rowKey(row);
+      if (k && !(k in index)) index[k] = i;
+    });
 
-  const r = data.record;
-  const targetEmpId = String(r.employee_id || '').trim().toLowerCase();
-  const targetYear = parseInt(r.year, 10);
-  const targetMonthNum = parseInt(r.monthNum || r.month, 10);
+    const now = Utilities.formatDate(new Date(), ctx.tz, 'yyyy-MM-dd HH:mm:ss');
+    const latestDetails = {};
+    const results = [];
+    let changed = false;
 
-  const rows = sheet.getDataRange().getValues();
-  let matchRowIndex = -1;
+    (data.items || []).forEach(function (item) {
+      const r = item.record || {};
+      const newKey = keyOf(r.employee_id, r.year, r.month);
+      if (!newKey) {
+        results.push({ status: 'invalid', error: 'Employee ID, Month and Year are required' });
+        return;
+      }
+      const m = item.matchKey;
+      const matchKey = m ? keyOf(m.employeeId, m.year, m.month) : newKey;
+      const at = matchKey in index ? index[matchKey] : -1;
 
-  for (let i = 1; i < rows.length; i++) {
-    const rowEmpId = String(rows[i][0] || '').trim().toLowerCase();
-    const rowMonth = String(rows[i][9] || '');
-    const rowYear = parseInt(rows[i][10], 10);
+      if (item.mustExist && at < 0) { results.push({ status: 'not_found' }); return; }
+      if (item.mustNotExist && at >= 0) { results.push({ status: 'conflict' }); return; }
+      if (matchKey !== newKey && newKey in index) { results.push({ status: 'conflict' }); return; }
 
-    const monthMatches = rowMonth.includes('(' + targetMonthNum + ')') || parseInt(rowMonth, 10) === targetMonthNum;
-    if (rowEmpId === targetEmpId && rowYear === targetYear && monthMatches) {
-      matchRowIndex = i + 1; // 1-based index
-      break;
+      const row = recordToRow(r, now);
+      if (at >= 0) {
+        rows[at] = row;
+        if (matchKey !== newKey) {
+          delete index[matchKey];
+          index[newKey] = at;
+        }
+        results.push({ status: 'updated' });
+      } else {
+        rows.push(row);
+        index[newKey] = rows.length - 1;
+        results.push({ status: 'inserted' });
+      }
+      latestDetails[normId(r.employee_id)] = row;
+      changed = true;
+    });
+
+    if (changed) {
+      rows.forEach(function (row) {
+        const source = latestDetails[normId(row[COL.employee_id])];
+        if (!source || source === row) return;
+        EMPLOYEE_DETAIL_FIELDS.forEach(function (field) {
+          row[COL[field]] = source[COL[field]];
+        });
+      });
+      writeRows(ctx.sheet, rows);
     }
-  }
 
-  const newRow = recordToRow(r);
-
-  if (matchRowIndex > 0) {
-    sheet.getRange(matchRowIndex, 1, 1, HEADERS.length).setValues([newRow]);
-    return { success: true, action: 'updated', row: matchRowIndex, sheetUrl: ss.getUrl() };
-  } else {
-    sheet.appendRow(newRow);
-    return { success: true, action: 'appended', sheetUrl: ss.getUrl() };
-  }
+    return { success: true, results: results, sheetUrl: ctx.ss.getUrl() };
+  });
 }
 
-function handleDeleteRecord(data) {
-  const folder = getFolder(data.folderId);
-  const ss = getOrCreateSpreadsheet(folder, data.sheetTitle || 'Payslip Generator - Salary Records');
-  const sheet = ss.getSheetByName('Salary Records') || ss.getActiveSheet();
+/** data.keys: [{ employeeId, year, month }]. Deletes every row matching any key. */
+function handleDeleteRecords(data) {
+  return withLock(function () {
+    const ctx = openRecordsSheet(data);
+    const wanted = {};
+    (data.keys || []).forEach(function (k) {
+      const key = keyOf(k.employeeId, k.year, k.month);
+      if (key) wanted[key] = true;
+    });
 
-  const targetEmpId = String(data.employeeId || '').trim().toLowerCase();
-  const targetYear = parseInt(data.year, 10);
-  const targetMonthNum = parseInt(data.month, 10);
+    const sheetRows = [];
+    readRows(ctx.sheet, ctx.tz).forEach(function (row, i) {
+      if (wanted[rowKey(row)]) sheetRows.push(i + 2);
+    });
+    if (sheetRows.length === 0) return { success: true, deleted: 0 };
 
-  const rows = sheet.getDataRange().getValues();
-  for (let i = 1; i < rows.length; i++) {
-    const rowEmpId = String(rows[i][0] || '').trim().toLowerCase();
-    const rowMonth = String(rows[i][9] || '');
-    const rowYear = parseInt(rows[i][10], 10);
-
-    const monthMatches = rowMonth.includes('(' + targetMonthNum + ')') || parseInt(rowMonth, 10) === targetMonthNum;
-    if (rowEmpId === targetEmpId && rowYear === targetYear && monthMatches) {
-      sheet.deleteRow(i + 1);
-      return { success: true, action: 'deleted', row: i + 1 };
+    // Sheets refuses to delete every non-frozen row, so keep one spare.
+    if (ctx.sheet.getMaxRows() - sheetRows.length < 2) {
+      ctx.sheet.insertRowsAfter(ctx.sheet.getMaxRows(), 1);
     }
-  }
-
-  return { success: false, message: 'Record not found' };
+    // Bottom-up, in contiguous runs, so earlier row numbers stay valid.
+    let end = sheetRows.length - 1;
+    while (end >= 0) {
+      let start = end;
+      while (start > 0 && sheetRows[start - 1] === sheetRows[start] - 1) start--;
+      ctx.sheet.deleteRows(sheetRows[start], end - start + 1);
+      end = start - 1;
+    }
+    return { success: true, deleted: sheetRows.length };
+  });
 }
 
 function handleUploadPdf(data) {
@@ -268,11 +436,10 @@ function handleUploadPdf(data) {
   const payslipsFolder = getOrCreateSubfolder(folder, 'Payslips');
   const monthFolder = getOrCreateSubfolder(payslipsFolder, (data.monthName || ('Month-' + data.month)) + ' ' + data.year);
 
-  // Decode PDF from base64
   const decodedBytes = Utilities.base64Decode(data.pdfBase64);
   const blob = Utilities.newBlob(decodedBytes, 'application/pdf', data.fileName);
 
-  // If a file with the same name exists, delete/replace it
+  // Re-generating a payslip replaces the previous file instead of duplicating it.
   const existingFiles = monthFolder.getFilesByName(data.fileName);
   while (existingFiles.hasNext()) {
     existingFiles.next().setTrashed(true);

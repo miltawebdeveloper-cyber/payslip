@@ -6,22 +6,9 @@ require('dotenv').config();
 const salaryDataRoutes = require('./routes/salaryDataRoutes');
 const payslipRoutes = require('./routes/payslipRoutes');
 const googleRoutes = require('./routes/googleRoutes');
-const { ensureDbSynced } = require('./config/database');
 const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
-
-// On Vercel serverless functions, ensure database is synced on first request
-if (process.env.VERCEL) {
-  app.use(async (req, res, next) => {
-    try {
-      await ensureDbSynced();
-      next();
-    } catch (err) {
-      next(err);
-    }
-  });
-}
 
 const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173')
   .split(',')

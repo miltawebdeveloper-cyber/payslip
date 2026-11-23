@@ -11,12 +11,12 @@ export async function createSalaryRow(payload) {
 }
 
 export async function updateSalaryRow(id, payload) {
-  const { data } = await apiClient.put(`/salary-data/${id}`, payload);
+  const { data } = await apiClient.put(`/salary-data/${encodeURIComponent(id)}`, payload);
   return data;
 }
 
 export async function deleteSalaryRow(id) {
-  await apiClient.delete(`/salary-data/${id}`);
+  await apiClient.delete(`/salary-data/${encodeURIComponent(id)}`);
 }
 
 // `selection` is either { ids: [...] } or { allMatching: true, filters: {...} }.
