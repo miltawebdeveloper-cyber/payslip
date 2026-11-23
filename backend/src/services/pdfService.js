@@ -6,37 +6,44 @@ const isServerless = Boolean(
 
 let browserPromise = null;
 
-async function getBrowser() {
-  if (browserPromise) return browserPromise;
+// puppeteer, puppeteer-core and @sparticuz/chromium are ES modules only, so
+// they're loaded with import(): require() of an ES module fails on Node
+// versions before 22.12.
 
-  if (isServerless) {
-    try {
-      const chromium = require('@sparticuz/chromium');
-      const puppeteerCore = require('puppeteer-core');
+/** Serverless (Vercel): the slim Chromium build from @sparticuz/chromium. */
+async function launchServerlessChromium() {
+  const { default: chromium } = await import('@sparticuz/chromium');
+  const { default: puppeteerCore } = await import('puppeteer-core');
 
-      // Optional: allow remote font loading if needed
-      chromium.setGraphicsMode = false;
+  // No WebGL needed for payslips; also skips extracting the graphics stack.
+  chromium.setGraphicsMode = false;
 
-      browserPromise = puppeteerCore.launch({
-        args: [...chromium.args, '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-        defaultViewport: chromium.defaultViewport,
-        executablePath: await chromium.executablePath(),
-        headless: chromium.headless,
-      });
+  return puppeteerCore.launch({
+    args: await puppeteerCore.defaultArgs({ args: chromium.args, headless: 'shell' }),
+    defaultViewport: { width: 1240, height: 1754, deviceScaleFactor: 1 },
+    executablePath: await chromium.executablePath(),
+    headless: 'shell',
+  });
+}
 
-      return browserPromise;
-    } catch (serverlessErr) {
-      // eslint-disable-next-line no-console
-      console.warn('Could not launch serverless Chromium, falling back to standard Puppeteer:', serverlessErr.message);
-    }
-  }
-
-  const puppeteer = require('puppeteer');
-  browserPromise = puppeteer.launch({
+/** Local development: the Chrome that the full puppeteer package downloads. */
+async function launchLocalPuppeteer() {
+  const { default: puppeteer } = await import('puppeteer');
+  return puppeteer.launch({
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
   });
+}
 
+function getBrowser() {
+  if (!browserPromise) {
+    browserPromise = (isServerless ? launchServerlessChromium() : launchLocalPuppeteer())
+      .catch((err) => {
+        // Don't cache a failed launch: let the next request try again.
+        browserPromise = null;
+        throw new Error(`Could not start the PDF browser: ${err.message}`);
+      });
+  }
   return browserPromise;
 }
 
