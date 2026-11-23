@@ -161,23 +161,26 @@ The application integrates with your personal Google account:
 
 ### Deploying the Complete Application to Vercel
 
-The entire full-stack application (frontend, API routes, database connection, PDF generation, Google Sheets & Drive) is preconfigured for single-repo Vercel deployment with `vercel.json` and `api/index.js`.
+The repo deploys as one Vercel project with two [services](https://vercel.com/docs/services), defined in the root `vercel.json`:
+
+| Service | Directory | Public path |
+|---|---|---|
+| `backend` (Express, entry `src/app.js`) | `backend/` | `/api` and `/api/*` |
+| `frontend` (Vite SPA) | `frontend/` | everything else; unknown paths fall back to `index.html` |
+
+Both are served from the same domain, so the browser calls the API at the relative path `/api` (the default `VITE_API_BASE_URL`) and needs no CORS setup. The backend receives the full path (`/api/health`, not `/health`), matching its Express routes. Neither service calls the other server-side, so no service bindings are configured.
 
 1. **Database:** Create a managed PostgreSQL database (such as Neon, Supabase, or AWS RDS). Copy the connection string (`DATABASE_URL`).
 2. **Push Repository:** Push this repository to GitHub/GitLab/Bitbucket.
-3. **Import into Vercel:**
-   - Framework preset: Vite.
-   - Root directory: `./` (leave default).
-4. **Environment Variables on Vercel:**
-   Set the following variables in your Vercel project settings:
+3. **Import into Vercel:** keep the root directory at `./`. The services in `vercel.json` set each service's framework and directory.
+4. **Environment Variables on Vercel** (project settings; shared by both services):
    - `DATABASE_URL` (or `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_SSL=true`)
    - `NODE_ENV=production`
-   - `GOOGLE_CLIENT_ID`
-   - `GOOGLE_CLIENT_SECRET`
-   - `GOOGLE_REFRESH_TOKEN`
-   - `GOOGLE_REDIRECT_URI=https://<your-vercel-domain>/api/google/oauth2callback`
+   - Google, either `GOOGLE_APPS_SCRIPT_URL` (plus optional `GOOGLE_DRIVE_MAIN_FOLDER_ID`, `GOOGLE_SHEET_TITLE`) or `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN` and `GOOGLE_REDIRECT_URI=https://<your-vercel-domain>/api/google/oauth2callback`
    - `COMPANY_NAME`, `COMPANY_ADDRESS`, `COMPANY_PHONE`
-5. **Deploy:** Click **Deploy**. Vercel will build the frontend and serve backend endpoints under `/api/*` as serverless functions. PDF generation runs using `@sparticuz/chromium` in the serverless environment.
+5. **Deploy:** Click **Deploy**. PDF generation runs using `@sparticuz/chromium` in the serverless environment. Function memory is set in the project dashboard (**Settings → Functions**), not in `vercel.json`.
+
+To run both services locally the way Vercel routes them, use `vercel dev` from the repo root (after `vercel link`).
 
 ## A note on access control
 

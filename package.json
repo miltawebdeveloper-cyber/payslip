@@ -3,10 +3,6 @@
   "private": true,
   "version": "1.0.0",
   "description": "Payslip Generator - Salary Data + Payslip Generator modules with Google Sheets & Drive Integration",
-  "workspaces": [
-    "backend",
-    "frontend"
-  ],
   "scripts": {
     "build": "npm run build --prefix frontend",
     "install:all": "npm install --prefix backend && npm install --prefix frontend",
