@@ -19,10 +19,20 @@ const LINE = `1px solid ${C.line}`;
 const FONT = "'Helvetica Neue', Arial, sans-serif";
 
 const blockSx = { border: FRAME };
-const cellSx = { px: 1.5, py: 0.875, fontSize: 12, minWidth: 0, overflowWrap: 'anywhere' };
+// A whole-pixel line height keeps every row the same height, like the PDF.
+const cellSx = { px: 1.5, py: '7px', fontSize: 12, lineHeight: '17px', minWidth: 0, overflowWrap: 'anywhere' };
 const labelSx = { ...cellSx, color: C.inkSoft };
 const valueSx = { ...cellSx, fontWeight: 600, borderLeft: LINE };
 const amountSx = { textAlign: 'right', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' };
+
+// Same column widths as PAY_COLUMNS in the PDF template: description |
+// amount (| description | amount), split at 50% like the details table.
+const PAY_COLUMNS = { 1: '60fr 40fr', 2: '30fr 20fr 30fr 20fr' };
+const payHeadSx = {
+  backgroundColor: C.band, color: C.inkSoft, fontSize: 11, fontWeight: 700,
+  letterSpacing: '0.06em', textTransform: 'uppercase',
+};
+const payTotalSx = { backgroundColor: C.bandStrong, fontWeight: 700, borderTop: LINE };
 
 /**
  * The payslip only ever shows what the server's layout contains — the fields
@@ -41,7 +51,7 @@ function Details({ rows }) {
           >
             {row.map((field, i) => (
               <Fragment key={field.key}>
-                <Box sx={{ ...labelSx, borderLeft: i ? LINE : 'none' }}>{field.label}</Box>
+                <Box sx={{ ...labelSx, borderLeft: i ? FRAME : 'none' }}>{field.label}</Box>
                 <Box sx={{ ...valueSx, gridColumn: row.length === 1 ? 'span 3' : undefined }}>{field.value}</Box>
               </Fragment>
             ))}
@@ -61,64 +71,76 @@ function Details({ rows }) {
   );
 }
 
-function PayLine({ label, amount, sx }) {
+/** One row of the pay table: a description/amount pair per section. */
+function PayRow({ pairs, sx }) {
+  // Cells take the row's font size, so the header row can set a smaller one.
+  const payCellSx = { ...cellSx, fontSize: 'inherit' };
   return (
-    <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1.5, px: 1.5, py: 0.875, fontSize: 12, ...sx }}>
-      <Box sx={{ minWidth: 0 }}>{label}</Box>
-      <Box sx={amountSx}>{amount}</Box>
-    </Box>
-  );
-}
-
-function PaySections({ sections }) {
-  if (!sections.length) return null;
-  const twoUp = sections.length === 2;
-  return (
-    <Box sx={{ ...blockSx, display: 'grid', gridTemplateColumns: { xs: 'minmax(0, 1fr)', sm: twoUp ? 'repeat(2, minmax(0, 1fr))' : 'minmax(0, 1fr)' } }}>
-      {sections.map((section, idx) => (
-        <Box
-          key={section.key}
-          sx={{
-            display: 'flex', flexDirection: 'column', minWidth: 0,
-            ...(idx > 0 && { borderTop: { xs: FRAME, sm: 'none' }, borderLeft: { xs: 'none', sm: FRAME } }),
-          }}
-        >
-          <PayLine
-            label={section.title}
-            amount="Amount"
-            sx={{
-              backgroundColor: C.band, color: C.inkSoft, fontSize: 11, fontWeight: 700,
-              letterSpacing: '0.06em', textTransform: 'uppercase', borderBottom: LINE,
-            }}
-          />
-          {section.items.map((item, i) => (
-            <PayLine key={item.key} label={item.label} amount={formatCurrency(item.amount)} sx={{ borderTop: i ? LINE : 'none' }} />
-          ))}
-          <PayLine
-            label={section.total.label}
-            amount={formatCurrency(section.total.amount)}
-            sx={{ mt: 'auto', backgroundColor: C.bandStrong, fontWeight: 700, borderTop: LINE }}
-          />
-        </Box>
+    <Box sx={{ display: 'grid', gridTemplateColumns: PAY_COLUMNS[pairs.length], fontSize: 12, ...sx }}>
+      {pairs.map(([label, amount], i) => (
+        <Fragment key={i}>
+          <Box sx={{ ...payCellSx, borderLeft: i ? FRAME : 'none' }}>{label}</Box>
+          <Box sx={{ ...payCellSx, ...amountSx }}>{amount}</Box>
+        </Fragment>
       ))}
     </Box>
   );
 }
 
-function NetPay({ netPay, twoUp }) {
+const headPair = (section) => [section.title, 'Amount'];
+const itemPair = (item) => (item ? [item.label, formatCurrency(item.amount)] : ['', '']);
+const totalPair = (section) => [section.total.label, formatCurrency(section.total.amount)];
+
+/**
+ * Like the PDF, row N holds the Nth earning and the Nth deduction, so both
+ * sides share row heights and lines; the totals share the last row. On a
+ * phone the sections stack instead.
+ */
+function PaySections({ sections }) {
+  if (!sections.length) return null;
+  const rowCount = Math.max(...sections.map((section) => section.items.length));
   return (
-    <Box sx={{ ...blockSx, display: 'grid', gridTemplateColumns: { xs: 'minmax(0, 1fr)', sm: twoUp ? 'repeat(2, minmax(0, 1fr))' : 'minmax(0, 1fr)' } }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1.5, px: 1.5, py: 1.25, fontWeight: 700, fontSize: 12.5 }}>
-        <Box>{netPay.label}</Box>
-        <Box sx={{ ...amountSx, fontSize: 15 }}>{formatCurrency(netPay.amount)}</Box>
+    <Box>
+      <Box sx={{ ...blockSx, display: { xs: 'none', sm: 'block' } }}>
+        <PayRow pairs={sections.map(headPair)} sx={payHeadSx} />
+        {Array.from({ length: rowCount }, (_, row) => (
+          <PayRow key={row} pairs={sections.map((section) => itemPair(section.items[row]))} sx={{ borderTop: LINE }} />
+        ))}
+        <PayRow pairs={sections.map(totalPair)} sx={payTotalSx} />
       </Box>
+      <Box sx={{ ...blockSx, display: { xs: 'block', sm: 'none' } }}>
+        {sections.map((section, idx) => (
+          <Box key={section.key} sx={{ borderTop: idx ? FRAME : 'none' }}>
+            <PayRow pairs={[headPair(section)]} sx={payHeadSx} />
+            {section.items.map((item) => (
+              <PayRow key={item.key} pairs={[itemPair(item)]} sx={{ borderTop: LINE }} />
+            ))}
+            <PayRow pairs={[totalPair(section)]} sx={payTotalSx} />
+          </Box>
+        ))}
+      </Box>
+    </Box>
+  );
+}
+
+/**
+ * Net pay on the pay table's columns: the amount lines up with the Earnings
+ * amounts and the words sit in the right half of the same row (below it on
+ * a phone, or when there is only one section).
+ */
+function NetPay({ netPay, sectionCount }) {
+  const twoUp = sectionCount === 2;
+  const netCellSx = { ...cellSx, py: '9px' };
+  return (
+    <Box sx={{ ...blockSx, display: 'grid', gridTemplateColumns: { xs: PAY_COLUMNS[1], sm: PAY_COLUMNS[twoUp ? 2 : 1] } }}>
+      <Box sx={{ ...netCellSx, fontWeight: 700 }}>{netPay.label}</Box>
+      <Box sx={{ ...netCellSx, ...amountSx, fontWeight: 700, fontSize: 15 }}>{formatCurrency(netPay.amount)}</Box>
       {netPay.inWords && (
         <Box
           sx={{
-            display: 'flex', alignItems: 'center', justifyContent: 'flex-end', textAlign: 'right',
-            px: 1.5, py: 1.25, fontWeight: 600, fontSize: 11.5, color: C.inkSoft,
+            ...netCellSx, gridColumn: 'span 2', fontWeight: 600, fontSize: 11.5, color: C.inkSoft,
             borderTop: { xs: LINE, sm: twoUp ? 'none' : LINE },
-            borderLeft: { xs: 'none', sm: twoUp ? LINE : 'none' },
+            borderLeft: { xs: 'none', sm: twoUp ? FRAME : 'none' },
           }}
         >
           {netPay.inWords}
@@ -170,7 +192,7 @@ export default function PayslipPreview({ data }) {
       <Box sx={{ display: 'grid', gap: 1.75, p: { xs: 1.25, sm: 2 } }}>
         <Details rows={detailRows} />
         <PaySections sections={paySections} />
-        <NetPay netPay={netPay} twoUp={paySections.length === 2} />
+        <NetPay netPay={netPay} sectionCount={paySections.length} />
       </Box>
 
       <Box sx={{ textAlign: 'center', fontSize: 11, fontStyle: 'italic', color: C.inkMuted, px: 1.5, pb: 1.75 }}>

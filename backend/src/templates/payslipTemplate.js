@@ -31,47 +31,97 @@ function renderHeader(company) {
     </header>`;
 }
 
+// Column widths (%) shared by the pay table and the net pay row, so every
+// amount sits in one right-aligned column and the words line up beneath the
+// Deductions descriptions. The halves split at 50%, like the details table.
+const PAY_COLUMNS = {
+  1: [60, 40],
+  2: [30, 20, 30, 20],
+};
+
+function colgroup(widths) {
+  return `<colgroup>${widths.map((w) => `<col style="width:${w}%" />`).join('')}</colgroup>`;
+}
+
+// The right half of a two-section table starts with a stronger divider.
+function splitAttr(index) {
+  return index > 0 ? ' class="split"' : '';
+}
+
 function renderDetails(detailRows) {
   if (!detailRows.length) return '';
   const rows = detailRows
     .map((row) => {
       const cells = row
-        .map((field) => `<th>${escapeHtml(field.label)}</th><td${row.length === 1 ? ' colspan="3"' : ''}>${escapeHtml(field.value)}</td>`)
+        .map((field, i) => `<th${splitAttr(i)}>${escapeHtml(field.label)}</th><td${row.length === 1 ? ' colspan="3"' : ''}>${escapeHtml(field.value)}</td>`)
         .join('');
       return `<tr>${cells}</tr>`;
     })
     .join('');
 
   return `
-    <table class="block details">
-      <colgroup><col style="width:22%" /><col style="width:28%" /><col style="width:22%" /><col style="width:28%" /></colgroup>
+    <table class="block grid details">
+      ${colgroup([22, 28, 22, 28])}
       ${rows}
     </table>`;
 }
 
-function line(className, label, amount) {
-  return `<div class="pay-line ${className}"><span>${escapeHtml(label)}</span><span class="amount">${escapeHtml(amount)}</span></div>`;
+function payCells(sectionIndex, label, amount) {
+  return `<td${splitAttr(sectionIndex)}>${escapeHtml(label)}</td><td class="amount">${escapeHtml(amount)}</td>`;
 }
 
+/**
+ * Earnings and Deductions share one table: row N holds the Nth earning and
+ * the Nth deduction, so both sides always have the same row heights and
+ * lines. The shorter side gets empty cells, and the totals share the last row.
+ */
 function renderPaySections(paySections) {
   if (!paySections.length) return '';
-  const columns = paySections
-    .map((section) => `
-      <div class="pay-col">
-        ${line('pay-head', section.title, 'Amount')}
-        ${section.items.map((item) => line('pay-item', item.label, formatCurrency(item.amount))).join('')}
-        ${line('pay-total', section.total.label, formatCurrency(section.total.amount))}
-      </div>`)
+  const rowCount = Math.max(...paySections.map((section) => section.items.length));
+
+  const head = paySections
+    .map((section, i) => `<th${splitAttr(i)}>${escapeHtml(section.title)}</th><th class="amount">Amount</th>`)
     .join('');
-  return `<div class="block pay${paySections.length === 2 ? ' two-up' : ''}">${columns}</div>`;
+  const items = Array.from({ length: rowCount }, (_, row) => {
+    const cells = paySections
+      .map((section, i) => {
+        const item = section.items[row];
+        return item ? payCells(i, item.label, formatCurrency(item.amount)) : payCells(i, '', '');
+      })
+      .join('');
+    return `<tr>${cells}</tr>`;
+  }).join('');
+  const totals = paySections
+    .map((section, i) => payCells(i, section.total.label, formatCurrency(section.total.amount)))
+    .join('');
+
+  return `
+    <table class="block grid pay">
+      ${colgroup(PAY_COLUMNS[paySections.length])}
+      <tr class="pay-head">${head}</tr>
+      ${items}
+      <tr class="pay-total">${totals}</tr>
+    </table>`;
 }
 
-function renderNetPay(netPay, twoUp) {
+/**
+ * Net pay on the same column grid as the pay table: the amount lines up with
+ * the Earnings amounts, and the words sit in the right half on the same row
+ * (or on their own row when there is only one section).
+ */
+function renderNetPay(netPay, sectionCount) {
+  const twoUp = sectionCount === 2;
+  const words = netPay.inWords ? escapeHtml(netPay.inWords) : '';
+  const main = `<th>${escapeHtml(netPay.label)}</th><td class="amount net-amount">${formatCurrency(netPay.amount)}</td>`;
+  const rows = twoUp
+    ? `<tr>${main}<td class="split net-words" colspan="2">${words}</td></tr>`
+    : `<tr>${main}</tr>${words ? `<tr><td class="net-words" colspan="2">${words}</td></tr>` : ''}`;
+
   return `
-    <div class="block net${twoUp ? ' two-up' : ''}">
-      <div class="net-main"><span>${escapeHtml(netPay.label)}</span><span class="amount net-amount">${formatCurrency(netPay.amount)}</span></div>
-      ${netPay.inWords ? `<div class="net-words">${escapeHtml(netPay.inWords)}</div>` : ''}
-    </div>`;
+    <table class="block grid net">
+      ${colgroup(PAY_COLUMNS[twoUp ? 2 : 1])}
+      ${rows}
+    </table>`;
 }
 
 // Browser printing only: a zero page margin stops the browser adding its own
@@ -88,8 +138,6 @@ const BROWSER_PRINT_CSS = `
  * nothing is added here that the layout left out.
  */
 function renderPayslipHtml(layout, { browserPrint = false } = {}) {
-  const twoUp = layout.paySections.length === 2;
-
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -139,37 +187,30 @@ function renderPayslipHtml(layout, { browserPrint = false } = {}) {
   .block { border: 1px solid var(--frame); }
   .block + .block { margin-top: 14px; }
 
-  table.details { width: 100%; border-collapse: collapse; table-layout: fixed; }
-  .details th, .details td {
-    padding: 7px 12px; text-align: left; vertical-align: top; font-size: 11px;
-    border-left: 1px solid var(--line); overflow-wrap: anywhere;
+  /* One cell style for every table, with a whole-pixel line height, so each
+     row is exactly the same height and every row line lands on a pixel. */
+  table.grid { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  .grid th, .grid td {
+    padding: 7px 12px; font-size: 11.5px; line-height: 16px; font-weight: 400;
+    text-align: left; vertical-align: middle; overflow-wrap: anywhere;
   }
-  .details th:first-child { border-left: none; }
-  .details tr + tr > * { border-top: 1px solid var(--line); }
-  .details th { font-weight: 400; color: var(--ink-soft); }
-  .details td { font-weight: 600; }
+  .grid tr + tr > * { border-top: 1px solid var(--line); }
+  .grid .split { border-left: 1px solid var(--frame); }
+  .grid .amount { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
-  .pay, .net { display: grid; grid-template-columns: minmax(0, 1fr); }
-  .pay.two-up, .net.two-up { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  .pay-col { display: flex; flex-direction: column; }
-  .pay-col + .pay-col { border-left: 1px solid var(--frame); }
-  .pay-line { display: flex; justify-content: space-between; gap: 12px; padding: 7px 12px; }
-  .pay-head {
+  .details th { color: var(--ink-soft); }
+  .details td { font-weight: 600; border-left: 1px solid var(--line); }
+
+  .grid .pay-head > * {
     background: var(--band); color: var(--ink-soft); font-size: 10.5px; font-weight: 700;
-    letter-spacing: 0.06em; text-transform: uppercase; border-bottom: 1px solid var(--line);
+    letter-spacing: 0.06em; text-transform: uppercase;
   }
-  .pay-item + .pay-item { border-top: 1px solid var(--line); }
-  .pay-total { margin-top: auto; background: var(--band-strong); font-weight: 700; border-top: 1px solid var(--line); }
-  .amount { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .grid .pay-total > * { background: var(--band-strong); font-weight: 700; }
 
-  .net-main { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 12px; font-weight: 700; }
-  .net-amount { font-size: 14px; }
-  .net-words {
-    display: flex; align-items: center; justify-content: flex-end; padding: 10px 12px;
-    text-align: right; font-weight: 600; font-size: 10.5px; color: var(--ink-soft);
-  }
-  .net.two-up .net-words { border-left: 1px solid var(--line); }
-  .net:not(.two-up) .net-words { border-top: 1px solid var(--line); }
+  .net th, .net td { padding-top: 9px; padding-bottom: 9px; }
+  .net th { font-weight: 700; }
+  .grid .net-amount { font-size: 14px; font-weight: 700; }
+  .grid .net-words { font-size: 10.5px; font-weight: 600; color: var(--ink-soft); }
 
   .note { text-align: center; font-size: 10px; font-style: italic; color: var(--ink-muted); padding: 0 12px 14px; }
   ${browserPrint ? BROWSER_PRINT_CSS : ''}
@@ -182,7 +223,7 @@ function renderPayslipHtml(layout, { browserPrint = false } = {}) {
     <div class="content">
       ${renderDetails(layout.detailRows)}
       ${renderPaySections(layout.paySections)}
-      ${renderNetPay(layout.netPay, twoUp)}
+      ${renderNetPay(layout.netPay, layout.paySections.length)}
     </div>
     <div class="note">Note: This is a system generated payslip and does not require signature</div>
   </div>
