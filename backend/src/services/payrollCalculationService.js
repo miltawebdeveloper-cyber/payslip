@@ -31,16 +31,24 @@ function calculatePayslip(salaryData) {
   let grossDeductions;
   switch (salaryData.payroll_type) {
     case PAYROLL_TYPES.PF_ESI:
+    case 'PF + ESI':
+    case 'PF_ESI':
       grossDeductions = round2(pfEmployee + esicEmployee + otherDeductions);
       break;
     case PAYROLL_TYPES.PF_ONLY:
+    case 'PF Only':
+    case 'PF ONLY':
+    case 'PF_ONLY':
       grossDeductions = round2(pfEmployee + otherDeductions);
       break;
     case PAYROLL_TYPES.NO_DEDUCTION:
+    case 'No Deduction':
+    case 'NO DEDUCTION':
+    case 'NO_DEDUCTION':
       grossDeductions = 0;
       break;
     default:
-      throw new Error(`Unknown payroll type: ${salaryData.payroll_type}`);
+      grossDeductions = 0;
   }
 
   const netPay = round2(grossEarnings - grossDeductions);
