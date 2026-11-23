@@ -46,7 +46,7 @@ function serializeRecordForSheet(record) {
     : record.month;
 
   return [
-    record.employee_id || record.employee?.employee_id || '',
+    record.employee?.employee_id || record.employee_id || '',
     record.employee_name || record.employee?.employee_name || '',
     record.designation || record.employee?.designation || '',
     record.date_of_joining || record.employee?.date_of_joining || '',
@@ -253,7 +253,7 @@ async function upsertRecordInGoogleSheet(record) {
       return syncAllRecordsToGoogleSheet([record]);
     }
 
-    const empId = String(record.employee_id || record.employee?.employee_id || '').trim().toLowerCase();
+    const empId = String(record.employee?.employee_id || record.employee_id || '').trim().toLowerCase();
     const monthNum = parseInt(record.month, 10);
     const yearNum = parseInt(record.year, 10);
 

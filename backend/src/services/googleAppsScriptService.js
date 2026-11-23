@@ -38,7 +38,7 @@ function formatRecord(record) {
     : String(record.month || '');
 
   return {
-    employee_id: record.employee_id || record.employee?.employee_id || '',
+    employee_id: record.employee?.employee_id || record.employee_id || '',
     employee_name: record.employee_name || record.employee?.employee_name || '',
     designation: record.designation || record.employee?.designation || '',
     date_of_joining: record.date_of_joining || record.employee?.date_of_joining || '',
