@@ -4,6 +4,11 @@ const catchAsync = require('../middleware/catchAsync');
 const { upsertEmployeeAndSalaryData } = require('../services/salaryRecordService');
 const { importSalaryDataFromExcel, generateTemplateWorkbook } = require('../services/excelImportService');
 const { calculatePayslip, round2 } = require('../services/payrollCalculationService');
+const {
+  upsertRecordInGoogleSheet,
+  deleteRecordFromGoogleSheet,
+  syncAllRecordsToGoogleSheet,
+} = require('../services/googleSheetsService');
 
 /**
  * Builds the where/include for the table's search and filters. Shared by the
@@ -138,6 +143,13 @@ const create = catchAsync(async (req, res) => {
 
   const { salaryData } = await upsertEmployeeAndSalaryData(payload);
   const created = await SalaryData.findByPk(salaryData.id, { include: [{ model: Employee, as: 'employee' }] });
+
+  // Continuously maintain Google Sheet
+  upsertRecordInGoogleSheet(created).catch((err) => {
+    // eslint-disable-next-line no-console
+    console.warn('Google Sheet sync failed on create:', err.message);
+  });
+
   res.status(201).json(serializeRow(created));
 });
 
@@ -148,13 +160,33 @@ const update = catchAsync(async (req, res) => {
   const payload = { ...req.body, employee_id: existing.employee.employee_id };
   const { salaryData } = await upsertEmployeeAndSalaryData(payload);
   const updated = await SalaryData.findByPk(salaryData.id, { include: [{ model: Employee, as: 'employee' }] });
+
+  // Continuously maintain Google Sheet
+  upsertRecordInGoogleSheet(updated).catch((err) => {
+    // eslint-disable-next-line no-console
+    console.warn('Google Sheet sync failed on update:', err.message);
+  });
+
   res.json(serializeRow(updated));
 });
 
 const remove = catchAsync(async (req, res) => {
-  const existing = await SalaryData.findByPk(req.params.id);
+  const existing = await SalaryData.findByPk(req.params.id, { include: [{ model: Employee, as: 'employee' }] });
   if (!existing) return res.status(404).json({ message: 'Salary data record not found' });
+
+  const empId = existing.employee?.employee_id;
+  const { month, year } = existing;
+
   await existing.destroy();
+
+  // Continuously maintain Google Sheet
+  if (empId) {
+    deleteRecordFromGoogleSheet(empId, month, year).catch((err) => {
+      // eslint-disable-next-line no-console
+      console.warn('Google Sheet sync failed on remove:', err.message);
+    });
+  }
+
   res.status(204).send();
 });
 
@@ -185,12 +217,44 @@ const bulkRemove = catchAsync(async (req, res) => {
 
   const ids = rows.map((row) => row.id);
   const deleted = ids.length > 0 ? await SalaryData.destroy({ where: { id: ids } }) : 0;
+
+  // Continuously maintain Google Sheet: resync with remaining records
+  SalaryData.findAll({
+    include: [{ model: Employee, as: 'employee', required: true }],
+    order: [
+      ['year', 'DESC'],
+      ['month', 'DESC'],
+      [{ model: Employee, as: 'employee' }, 'employee_name', 'ASC'],
+    ],
+  })
+    .then((remaining) => syncAllRecordsToGoogleSheet(remaining))
+    .catch((err) => {
+      // eslint-disable-next-line no-console
+      console.warn('Google Sheet sync after bulk remove failed:', err.message);
+    });
+
   res.json({ deleted });
 });
 
 const importExcel = catchAsync(async (req, res) => {
   if (!req.file) return res.status(400).json({ message: 'No file was uploaded' });
   const summary = await importSalaryDataFromExcel(req.file.buffer);
+
+  // Automatically store and maintain all records in Google Sheet after importing
+  SalaryData.findAll({
+    include: [{ model: Employee, as: 'employee', required: true }],
+    order: [
+      ['year', 'DESC'],
+      ['month', 'DESC'],
+      [{ model: Employee, as: 'employee' }, 'employee_name', 'ASC'],
+    ],
+  })
+    .then((allRecords) => syncAllRecordsToGoogleSheet(allRecords))
+    .catch((err) => {
+      // eslint-disable-next-line no-console
+      console.warn('Google Sheet sync after Excel import failed:', err.message);
+    });
+
   res.json(summary);
 });
 

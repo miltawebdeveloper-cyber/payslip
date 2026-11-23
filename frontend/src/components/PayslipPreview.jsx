@@ -1,194 +1,181 @@
-import { Box, Paper, Typography, Divider } from '@mui/material';
-import { formatCurrency, formatDate, formatDays } from '../utils/format.js';
-import { MARK_GRADIENT } from '../theme.js';
+import { Fragment } from 'react';
+import { Box, Paper } from '@mui/material';
+import { formatCurrency } from '../utils/format.js';
 
-const GRID = '#000';
-const BAND_TINT = '#f2f2f2';
-const TOTALS_TINT = '#f2f2f2';
+// Mirrors the PDF stylesheet in backend/src/templates/payslipTemplate.js so
+// the preview looks like the downloaded / printed payslip. Keep in sync.
+const C = {
+  ink: '#1F2328',
+  inkSoft: '#5B636D',
+  inkMuted: '#8B929B',
+  frame: '#E3E6EA',
+  line: '#EEF0F2',
+  band: '#F6F7F9',
+  bandStrong: '#F1F3F5',
+  brand: '#266929',
+};
+const FRAME = `1px solid ${C.frame}`;
+const LINE = `1px solid ${C.line}`;
+const FONT = "'Helvetica Neue', Arial, sans-serif";
 
-const infoLabelSx = { color: '#000', fontSize: 12.5, py: 0.9, px: 1.5, borderRight: '1px solid', borderColor: GRID };
-const infoValueSx = { fontWeight: 600, fontSize: 12.5, py: 0.9, px: 1.5, borderRight: '1px solid', borderColor: GRID, wordBreak: 'break-word' };
+const blockSx = { border: FRAME };
+const cellSx = { px: 1.5, py: 0.875, fontSize: 12, minWidth: 0, overflowWrap: 'anywhere' };
+const labelSx = { ...cellSx, color: C.inkSoft };
+const valueSx = { ...cellSx, fontWeight: 600, borderLeft: LINE };
+const amountSx = { textAlign: 'right', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' };
 
-function InfoPair({ label, value, borderless }) {
+/**
+ * The payslip only ever shows what the server's layout contains — the fields
+ * this employee actually has data for — so preview, PDF and Print match.
+ */
+function Details({ rows }) {
+  if (!rows.length) return null;
   return (
-    <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1.3fr', borderBottom: borderless ? 'none' : '1px solid', borderColor: GRID }}>
-      <Box sx={infoLabelSx}>{label}</Box>
-      <Box sx={{ ...infoValueSx, borderRight: 'none' }}>{value || '-'}</Box>
+    <Box sx={blockSx}>
+      {/* Tablet / desktop: two label/value pairs per row, like the PDF */}
+      <Box sx={{ display: { xs: 'none', sm: 'block' } }}>
+        {rows.map((row, idx) => (
+          <Box
+            key={row[0].key}
+            sx={{ display: 'grid', gridTemplateColumns: '22fr 28fr 22fr 28fr', borderTop: idx ? LINE : 'none' }}
+          >
+            {row.map((field, i) => (
+              <Fragment key={field.key}>
+                <Box sx={{ ...labelSx, borderLeft: i ? LINE : 'none' }}>{field.label}</Box>
+                <Box sx={{ ...valueSx, gridColumn: row.length === 1 ? 'span 3' : undefined }}>{field.value}</Box>
+              </Fragment>
+            ))}
+          </Box>
+        ))}
+      </Box>
+      {/* Mobile: one pair per line */}
+      <Box sx={{ display: { xs: 'block', sm: 'none' } }}>
+        {rows.flat().map((field, idx) => (
+          <Box key={field.key} sx={{ display: 'grid', gridTemplateColumns: '1fr 1.3fr', borderTop: idx ? LINE : 'none' }}>
+            <Box sx={labelSx}>{field.label}</Box>
+            <Box sx={valueSx}>{field.value}</Box>
+          </Box>
+        ))}
+      </Box>
     </Box>
   );
 }
 
-function InfoRow({ labelA, valueA, labelB, valueB, last }) {
+function PayLine({ label, amount, sx }) {
   return (
-    <>
-      {/* Desktop / tablet: both pairs on one line */}
-      <Box
-        sx={{
-          display: { xs: 'none', sm: 'grid' },
-          gridTemplateColumns: '1fr 1.3fr 1fr 1.3fr',
-          borderBottom: last ? 'none' : '1px solid', borderColor: GRID,
-        }}
-      >
-        <Box sx={infoLabelSx}>{labelA}</Box>
-        <Box sx={infoValueSx}>{valueA || '-'}</Box>
-        <Box sx={infoLabelSx}>{labelB}</Box>
-        <Box sx={{ ...infoValueSx, borderRight: 'none' }}>{valueB || '-'}</Box>
-      </Box>
-      {/* Mobile: each label/value pair stacked on its own line */}
-      <Box sx={{ display: { xs: 'block', sm: 'none' } }}>
-        <InfoPair label={labelA} value={valueA} />
-        <InfoPair label={labelB} value={valueB} borderless={last} />
-      </Box>
-    </>
+    <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1.5, px: 1.5, py: 0.875, fontSize: 12, ...sx }}>
+      <Box sx={{ minWidth: 0 }}>{label}</Box>
+      <Box sx={amountSx}>{amount}</Box>
+    </Box>
   );
 }
 
-function buildLineItems(calc, payrollType) {
-  const earnings = [
-    { label: 'Basic', amount: calc.earnings.basic },
-    { label: 'HRA', amount: calc.earnings.hra },
-    { label: 'Conveyance allowances', amount: calc.earnings.conveyanceAllowances },
-    { label: 'Medical allowances', amount: calc.earnings.medicalAllowances },
-    { label: 'Special Allowances', amount: calc.earnings.specialAllowances },
-    { label: 'Night Shift Allowances', amount: calc.earnings.nightShiftAllowances },
-  ];
-  if (calc.earnings.otherEarnings > 0) earnings.push({ label: 'Other Earnings', amount: calc.earnings.otherEarnings });
-
-  const deductions = [];
-  if (payrollType !== 'NO_DEDUCTION') {
-    if (payrollType === 'PF_ESI') deductions.push({ label: 'ESIC (Employee)', amount: calc.deductions.esicEmployee });
-    deductions.push({ label: 'Provident Fund (Employee)', amount: calc.deductions.pfEmployee });
-    if (calc.deductions.otherDeductions > 0) deductions.push({ label: 'Other Deductions', amount: calc.deductions.otherDeductions });
-  }
-
-  const rowCount = Math.max(earnings.length, deductions.length);
-  while (earnings.length < rowCount) earnings.push({ label: '', amount: null });
-  while (deductions.length < rowCount) deductions.push({ label: '', amount: null });
-
-  return { earnings, deductions };
+function PaySections({ sections }) {
+  if (!sections.length) return null;
+  const twoUp = sections.length === 2;
+  return (
+    <Box sx={{ ...blockSx, display: 'grid', gridTemplateColumns: { xs: 'minmax(0, 1fr)', sm: twoUp ? 'repeat(2, minmax(0, 1fr))' : 'minmax(0, 1fr)' } }}>
+      {sections.map((section, idx) => (
+        <Box
+          key={section.key}
+          sx={{
+            display: 'flex', flexDirection: 'column', minWidth: 0,
+            ...(idx > 0 && { borderTop: { xs: FRAME, sm: 'none' }, borderLeft: { xs: 'none', sm: FRAME } }),
+          }}
+        >
+          <PayLine
+            label={section.title}
+            amount="Amount"
+            sx={{
+              backgroundColor: C.band, color: C.inkSoft, fontSize: 11, fontWeight: 700,
+              letterSpacing: '0.06em', textTransform: 'uppercase', borderBottom: LINE,
+            }}
+          />
+          {section.items.map((item, i) => (
+            <PayLine key={item.key} label={item.label} amount={formatCurrency(item.amount)} sx={{ borderTop: i ? LINE : 'none' }} />
+          ))}
+          <PayLine
+            label={section.total.label}
+            amount={formatCurrency(section.total.amount)}
+            sx={{ mt: 'auto', backgroundColor: C.bandStrong, fontWeight: 700, borderTop: LINE }}
+          />
+        </Box>
+      ))}
+    </Box>
+  );
 }
 
-function AmountLine({ label, amount }) {
-  if (!label) return null;
+function NetPay({ netPay, twoUp }) {
   return (
-    <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1, fontSize: 12.5, py: 1, px: 1.5, borderBottom: '1px solid', borderColor: GRID }}>
-      <Box>{label}</Box>
-      <Box sx={{ fontWeight: 600 }}>{amount === null ? '-' : formatCurrency(amount)}</Box>
+    <Box sx={{ ...blockSx, display: 'grid', gridTemplateColumns: { xs: 'minmax(0, 1fr)', sm: twoUp ? 'repeat(2, minmax(0, 1fr))' : 'minmax(0, 1fr)' } }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1.5, px: 1.5, py: 1.25, fontWeight: 700, fontSize: 12.5 }}>
+        <Box>{netPay.label}</Box>
+        <Box sx={{ ...amountSx, fontSize: 15 }}>{formatCurrency(netPay.amount)}</Box>
+      </Box>
+      {netPay.inWords && (
+        <Box
+          sx={{
+            display: 'flex', alignItems: 'center', justifyContent: 'flex-end', textAlign: 'right',
+            px: 1.5, py: 1.25, fontWeight: 600, fontSize: 11.5, color: C.inkSoft,
+            borderTop: { xs: LINE, sm: twoUp ? 'none' : LINE },
+            borderLeft: { xs: 'none', sm: twoUp ? LINE : 'none' },
+          }}
+        >
+          {netPay.inWords}
+        </Box>
+      )}
     </Box>
   );
 }
 
 export default function PayslipPreview({ data }) {
-  if (!data) return null;
-  const { company, employee, salaryData, calc, monthLabel, payrollDuration, amountInWords } = data;
-  const { earnings, deductions } = buildLineItems(calc, salaryData.payroll_type);
+  const layout = data?.layout;
+  if (!layout) return null;
+  const { company, title, detailRows, paySections, netPay } = layout;
 
   return (
-    <Paper variant="outlined" sx={{ maxWidth: 820, mx: 'auto', overflow: 'hidden', borderRadius: 0, borderColor: GRID, color: '#000', boxShadow: 3 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: { xs: 1.5, sm: 2.25 }, p: { xs: 1.5, sm: 2.5 }, borderBottom: '1px solid', borderColor: GRID }}>
-        {company.logoUrl ? (
+    <Paper
+      variant="outlined"
+      sx={{ maxWidth: 820, mx: 'auto', overflow: 'hidden', borderRadius: 0, borderColor: C.frame, color: C.ink, fontFamily: FONT, boxShadow: 3 }}
+    >
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: { xs: 1.5, sm: 2.25 }, p: { xs: 1.5, sm: 2.25 } }}>
+        {company.logoUrl && (
           <Box
             component="img"
             src={company.logoUrl}
-            alt={company.name}
-            sx={{ display: 'block', height: { xs: 40, sm: 62 }, width: 'auto', maxWidth: { xs: 90, sm: 160 }, flexShrink: 0 }}
+            alt={company.name || ''}
+            sx={{ display: 'block', height: { xs: 40, sm: 60 }, width: 'auto', maxWidth: { xs: 90, sm: 160 }, flexShrink: 0 }}
           />
-        ) : (
-          <Box
-            sx={{
-              width: { xs: 44, sm: 60 }, height: { xs: 44, sm: 60 }, borderRadius: '50%', flexShrink: 0,
-              display: 'grid', placeItems: 'center', background: MARK_GRADIENT, color: '#fff',
-              fontSize: { xs: 18, sm: 26 }, fontWeight: 700, fontFamily: 'Georgia, serif',
-            }}
-          >
-            M
-          </Box>
         )}
-        <Box sx={{ minWidth: 0, pl: { xs: 1.5, sm: 2.25 }, borderLeft: '1px solid #DADADA' }}>
-          <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.2, fontSize: { xs: '1rem', sm: '1.25rem' }, color: '#000' }}>{company.name}</Typography>
-          <Typography variant="caption" sx={{ display: 'block', color: '#333' }}>{company.address}</Typography>
-          <Typography variant="caption" sx={{ display: 'block', color: '#333', mt: 0.25 }}>Phone No: {company.phone}</Typography>
+        <Box sx={{ minWidth: 0, ...(company.logoUrl && { pl: { xs: 1.5, sm: 2.25 }, borderLeft: FRAME }) }}>
+          {company.name && (
+            <Box sx={{ fontWeight: 700, lineHeight: 1.2, fontSize: { xs: '1rem', sm: '1.1875rem' }, letterSpacing: '-0.01em', mb: 0.375 }}>
+              {company.name}
+            </Box>
+          )}
+          {company.address && <Box sx={{ fontSize: 11.5, lineHeight: 1.6, color: C.inkSoft }}>{company.address}</Box>}
+          {company.phone && <Box sx={{ fontSize: 11.5, lineHeight: 1.6, color: C.inkSoft }}>Phone No: {company.phone}</Box>}
         </Box>
       </Box>
 
-      <Box sx={{ textAlign: 'center', py: 1, px: 1, backgroundColor: '#F5F9F2', color: '#266929', fontWeight: 700, fontSize: 13, borderBottom: '1px solid', borderColor: GRID }}>
-        Salary Slip for {monthLabel}
+      <Box
+        sx={{
+          textAlign: 'center', py: 1, px: 1.5, backgroundColor: C.band, color: C.brand, fontWeight: 700,
+          fontSize: 13, letterSpacing: '0.03em', borderTop: LINE, borderBottom: LINE,
+        }}
+      >
+        {title}
       </Box>
 
-      <Box>
-        <InfoRow labelA="Employee Name" valueA={employee.employee_name} labelB="Employee ID" valueB={employee.employee_id} />
-        <InfoRow labelA="Designation" valueA={employee.designation} labelB="Duration" valueB={payrollDuration} />
-        <InfoRow labelA="Date of Joining" valueA={formatDate(employee.date_of_joining)} labelB="Bank Name" valueB={employee.bank_name} />
-        <InfoRow labelA="PAN" valueA={employee.pan} labelB="Bank A/c No" valueB={employee.bank_account_number} />
-        <InfoRow labelA="ESIC No" valueA={employee.esic_no} labelB="Month Day" valueB={formatDays(salaryData.month_days)} />
-        <InfoRow labelA="UAN NO" valueA={employee.uan_no} labelB="Paid Day" valueB={formatDays(salaryData.paid_days)} last />
+      <Box sx={{ display: 'grid', gap: 1.75, p: { xs: 1.25, sm: 2 } }}>
+        <Details rows={detailRows} />
+        <PaySections sections={paySections} />
+        <NetPay netPay={netPay} twoUp={paySections.length === 2} />
       </Box>
 
-      {/* Desktop / tablet: earnings and deductions side by side */}
-      <Box sx={{ display: { xs: 'none', sm: 'block' } }}>
-        <Box sx={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1.4fr 1fr', backgroundColor: BAND_TINT, fontWeight: 700, fontSize: 12.5, borderTop: '1px solid', borderBottom: '1px solid', borderColor: GRID }}>
-          <Box sx={{ p: 1.2, borderRight: '1px solid', borderColor: GRID }}>EARNINGS</Box>
-          <Box sx={{ p: 1.2, textAlign: 'right', borderRight: '1px solid', borderColor: GRID }}>AMOUNT</Box>
-          <Box sx={{ p: 1.2, borderRight: '1px solid', borderColor: GRID }}>DEDUCTIONS</Box>
-          <Box sx={{ p: 1.2, textAlign: 'right' }}>AMOUNT</Box>
-        </Box>
-
-        {earnings.map((e, idx) => (
-          <Box key={idx} sx={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1.4fr 1fr', fontSize: 12.5, borderBottom: '1px solid', borderColor: GRID }}>
-            <Box sx={{ p: 1.2, borderRight: '1px solid', borderColor: GRID }}>{e.label}</Box>
-            <Box sx={{ p: 1.2, textAlign: 'right', borderRight: '1px solid', borderColor: GRID }}>{e.amount === null ? '-' : formatCurrency(e.amount)}</Box>
-            <Box sx={{ p: 1.2, borderRight: '1px solid', borderColor: GRID }}>{deductions[idx].label}</Box>
-            <Box sx={{ p: 1.2, textAlign: 'right' }}>{deductions[idx].amount === null ? '-' : formatCurrency(deductions[idx].amount)}</Box>
-          </Box>
-        ))}
-
-        <Box sx={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1.4fr 1fr', fontWeight: 700, fontSize: 12.5, backgroundColor: TOTALS_TINT, borderTop: '1px solid', borderBottom: '1px solid', borderColor: GRID }}>
-          <Box sx={{ p: 1.2, borderRight: '1px solid', borderColor: GRID }}>Gross Earnings (A)</Box>
-          <Box sx={{ p: 1.2, textAlign: 'right', borderRight: '1px solid', borderColor: GRID }}>{formatCurrency(calc.grossEarnings)}</Box>
-          <Box sx={{ p: 1.2, borderRight: '1px solid', borderColor: GRID }}>Gross Deductions (B)</Box>
-          <Box sx={{ p: 1.2, textAlign: 'right' }}>{formatCurrency(calc.grossDeductions)}</Box>
-        </Box>
-
-        <Box sx={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 2.4fr', fontWeight: 700, backgroundColor: '#fff' }}>
-          <Box sx={{ p: 1.5, borderRight: '1px solid', borderColor: GRID }}>Net Pay (A - B)</Box>
-          <Box sx={{ p: 1.5, textAlign: 'right', fontSize: 15, color: '#000' }}>{formatCurrency(calc.netPay)}</Box>
-          <Box sx={{ p: 1.5, textAlign: 'right' }}>{amountInWords}</Box>
-        </Box>
-      </Box>
-
-      {/* Mobile: earnings and deductions stacked as separate panels */}
-      <Box sx={{ display: { xs: 'block', sm: 'none' } }}>
-        <Box sx={{ backgroundColor: BAND_TINT, fontWeight: 700, fontSize: 12.5, py: 1, px: 1.5, borderTop: '1px solid', borderBottom: '1px solid', borderColor: GRID }}>
-          EARNINGS
-        </Box>
-        {earnings.map((e, idx) => <AmountLine key={`e-${idx}`} label={e.label} amount={e.amount} />)}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: 12.5, backgroundColor: TOTALS_TINT, py: 1, px: 1.5, borderBottom: '1px solid', borderColor: GRID }}>
-          <Box>Gross Earnings (A)</Box>
-          <Box>{formatCurrency(calc.grossEarnings)}</Box>
-        </Box>
-
-        <Box sx={{ backgroundColor: BAND_TINT, fontWeight: 700, fontSize: 12.5, py: 1, px: 1.5, borderBottom: '1px solid', borderColor: GRID }}>
-          DEDUCTIONS
-        </Box>
-        {deductions.map((d, idx) => <AmountLine key={`d-${idx}`} label={d.label} amount={d.amount} />)}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: 12.5, backgroundColor: TOTALS_TINT, py: 1, px: 1.5, borderBottom: '1px solid', borderColor: GRID }}>
-          <Box>Gross Deductions (B)</Box>
-          <Box>{formatCurrency(calc.grossDeductions)}</Box>
-        </Box>
-
-        <Box sx={{ fontWeight: 700, backgroundColor: '#fff', p: 1.5 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', fontSize: 15 }}>
-            <Box>Net Pay (A - B)</Box>
-            <Box sx={{ color: '#000' }}>{formatCurrency(calc.netPay)}</Box>
-          </Box>
-          <Box sx={{ mt: 0.5, fontSize: 12, fontWeight: 600, color: '#333' }}>{amountInWords}</Box>
-        </Box>
-      </Box>
-
-      <Divider sx={{ borderColor: GRID }} />
-      <Typography variant="caption" align="center" sx={{ display: 'block', py: 1.5, px: 1, fontStyle: 'italic', color: '#333' }}>
+      <Box sx={{ textAlign: 'center', fontSize: 11, fontStyle: 'italic', color: C.inkMuted, px: 1.5, pb: 1.75 }}>
         Note: This is a system generated payslip and does not require signature
-      </Typography>
+      </Box>
     </Paper>
   );
 }

@@ -1,14 +1,42 @@
-const puppeteer = require('puppeteer');
+const isServerless = Boolean(
+  process.env.VERCEL ||
+  process.env.AWS_LAMBDA_FUNCTION_NAME ||
+  process.env.SERVERLESS
+);
 
 let browserPromise = null;
 
-function getBrowser() {
-  if (!browserPromise) {
-    browserPromise = puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    });
+async function getBrowser() {
+  if (browserPromise) return browserPromise;
+
+  if (isServerless) {
+    try {
+      const chromium = require('@sparticuz/chromium');
+      const puppeteerCore = require('puppeteer-core');
+
+      // Optional: allow remote font loading if needed
+      chromium.setGraphicsMode = false;
+
+      browserPromise = puppeteerCore.launch({
+        args: [...chromium.args, '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+        defaultViewport: chromium.defaultViewport,
+        executablePath: await chromium.executablePath(),
+        headless: chromium.headless,
+      });
+
+      return browserPromise;
+    } catch (serverlessErr) {
+      // eslint-disable-next-line no-console
+      console.warn('Could not launch serverless Chromium, falling back to standard Puppeteer:', serverlessErr.message);
+    }
   }
+
+  const puppeteer = require('puppeteer');
+  browserPromise = puppeteer.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+  });
+
   return browserPromise;
 }
 
@@ -36,8 +64,12 @@ async function renderHtmlToPdf(html) {
 
 async function closeBrowser() {
   if (browserPromise) {
-    const browser = await browserPromise;
-    await browser.close();
+    try {
+      const browser = await browserPromise;
+      await browser.close();
+    } catch (err) {
+      // ignore
+    }
     browserPromise = null;
   }
 }

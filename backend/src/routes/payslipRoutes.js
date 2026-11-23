@@ -6,6 +6,7 @@ const router = express.Router();
 router.get('/months', controller.listMonths);
 router.get('/employees', controller.listEmployeesForMonth);
 router.get('/preview', controller.preview);
+router.get('/print', controller.printView);
 router.post('/generate', controller.generate);
 router.post('/generate-all', controller.generateAll);
 

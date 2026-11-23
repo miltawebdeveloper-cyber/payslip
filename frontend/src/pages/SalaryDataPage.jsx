@@ -9,6 +9,8 @@ import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded';
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded';
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
 import FilterAltOffOutlinedIcon from '@mui/icons-material/FilterAltOffOutlined';
+import SyncRoundedIcon from '@mui/icons-material/SyncRounded';
+import OpenInNewRoundedIcon from '@mui/icons-material/OpenInNewRounded';
 import PageHeader from '../components/PageHeader.jsx';
 import SalaryDataTable from '../components/SalaryDataTable.jsx';
 import SalaryRowDialog from '../components/SalaryRowDialog.jsx';
@@ -23,6 +25,7 @@ import {
   fetchSalaryData, createSalaryRow, updateSalaryRow, deleteSalaryRow,
   fetchSelectionSummary, bulkDeleteSalaryRows,
 } from '../api/salaryDataApi.js';
+import { fetchGoogleStatus, syncGoogleSheet } from '../api/googleApi.js';
 import { BRAND } from '../theme.js';
 
 const SEARCH_DEBOUNCE_MS = 300;
@@ -70,8 +73,36 @@ export default function SalaryDataPage() {
   const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+  const [googleStatus, setGoogleStatus] = useState(null);
+  const [syncingSheet, setSyncingSheet] = useState(false);
 
   const notify = (message, severity = 'success') => setSnackbar({ open: true, message, severity });
+
+  const loadGoogleStatus = useCallback(async () => {
+    try {
+      const status = await fetchGoogleStatus();
+      setGoogleStatus(status);
+    } catch {
+      // Google integration optional / pending config
+    }
+  }, []);
+
+  const handleSyncGoogleSheet = async () => {
+    setSyncingSheet(true);
+    try {
+      const res = await syncGoogleSheet();
+      notify(res.message || 'Google Sheet synchronized successfully');
+      loadGoogleStatus();
+    } catch (err) {
+      notify(err.response?.data?.message || 'Failed to sync Google Sheet', 'error');
+    } finally {
+      setSyncingSheet(false);
+    }
+  };
+
+  useEffect(() => {
+    loadGoogleStatus();
+  }, [loadGoogleStatus]);
 
   const hasFilters = Boolean(search.trim() || month || year || payrollType);
 
@@ -275,6 +306,22 @@ export default function SalaryDataPage() {
         subtitle="Import, review and edit monthly salary records. Click any cell to edit it in place."
         actions={(
           <>
+            {googleStatus?.sheet?.sheetUrl && (
+              <Button
+                variant="outlined"
+                startIcon={<OpenInNewRoundedIcon />}
+                href={googleStatus.sheet.sheetUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                sx={{
+                  color: '#0F9D58',
+                  borderColor: '#0F9D58',
+                  '&:hover': { borderColor: '#0B8043', bgcolor: 'rgba(15,157,88,0.06)' },
+                }}
+              >
+                Google Sheet
+              </Button>
+            )}
             <Button variant="outlined" startIcon={<UploadFileOutlinedIcon />} onClick={() => setImportOpen(true)}>
               Import Excel
             </Button>
@@ -367,6 +414,34 @@ export default function SalaryDataPage() {
                 <RefreshRoundedIcon fontSize="small" />
               </IconButton>
             </Tooltip>
+            {googleStatus?.configured && (
+              <Tooltip title={syncingSheet ? 'Syncing to Google Sheet...' : 'Sync PostgreSQL to Google Sheet'}>
+                <span>
+                  <IconButton
+                    onClick={handleSyncGoogleSheet}
+                    disabled={syncingSheet}
+                    aria-label="Sync with Google Sheet"
+                    sx={{
+                      border: `1px solid ${BRAND.line}`,
+                      width: 32,
+                      height: 32,
+                      color: '#0F9D58',
+                    }}
+                  >
+                    <SyncRoundedIcon
+                      fontSize="small"
+                      sx={{
+                        animation: syncingSheet ? 'spin 1s linear infinite' : 'none',
+                        '@keyframes spin': {
+                          '0%': { transform: 'rotate(0deg)' },
+                          '100%': { transform: 'rotate(360deg)' },
+                        },
+                      }}
+                    />
+                  </IconButton>
+                </span>
+              </Tooltip>
+            )}
           </Box>
         </Box>
 
@@ -421,7 +496,11 @@ export default function SalaryDataPage() {
       <ImportExcelDialog
         open={importOpen}
         onClose={() => setImportOpen(false)}
-        onImported={loadData}
+        onImported={() => {
+          loadData();
+          loadGoogleStatus();
+          notify('Excel imported and Google Sheet updated');
+        }}
       />
 
       <ConfirmDialog

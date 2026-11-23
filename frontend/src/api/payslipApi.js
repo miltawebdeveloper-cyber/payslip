@@ -15,6 +15,15 @@ export async function fetchPayslipPreview(employeeId, month, year) {
   return data;
 }
 
+// The same HTML the PDF is rendered from, for the browser's print dialog.
+export async function fetchPayslipPrintHtml(employeeId, month, year) {
+  const { data } = await apiClient.get('/payslip/print', {
+    params: { employeeId, month, year },
+    responseType: 'text',
+  });
+  return data;
+}
+
 function filenameFrom(response, fallback) {
   const disposition = response.headers['content-disposition'] || '';
   const match = disposition.match(/filename="(.+)"/);
@@ -39,13 +48,14 @@ export async function generateAllPayslips(month, year) {
   return { blob: response.data, filename: filenameFrom(response, `Payslips_${month}_${year}.zip`) };
 }
 
-// Requests made with responseType 'blob' receive their JSON error bodies as a
-// Blob too, so unwrap those before reading the server's message.
+// Requests made with responseType 'blob' or 'text' receive their JSON error
+// bodies as a Blob or string too, so unwrap those before reading the message.
 export async function getErrorMessage(err, fallback) {
   const data = err.response?.data;
-  if (data instanceof Blob) {
+  if (data instanceof Blob || typeof data === 'string') {
     try {
-      return JSON.parse(await data.text()).message || fallback;
+      const text = typeof data === 'string' ? data : await data.text();
+      return JSON.parse(text).message || fallback;
     } catch {
       return fallback;
     }

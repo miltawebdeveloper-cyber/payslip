@@ -2,6 +2,7 @@ const { Employee, SalaryData } = require('../models');
 const { calculatePayslip } = require('./payrollCalculationService');
 const { amountToWords } = require('./numberToWordsService');
 const { getPayrollDuration, getMonthLabel } = require('./durationService');
+const { buildPayslipLayout } = require('./payslipLayoutService');
 const { renderPayslipHtml } = require('../templates/payslipTemplate');
 const company = require('../config/company');
 
@@ -16,9 +17,10 @@ class NotFoundError extends Error {
 /**
  * Fetches the employee master record + the salary data for the requested
  * month/year and combines them into everything a payslip needs: the raw
- * fields, the centrally calculated totals, the payroll duration and the
- * amount in words. Used by both the live preview endpoint and PDF
- * generation, so they can never disagree with each other.
+ * fields, the centrally calculated totals, the payroll duration, the
+ * amount in words and the layout (only the fields this employee has data
+ * for). Used by the live preview, PDF generation and Print, so they can
+ * never disagree with each other.
  */
 async function buildPayslipData(employeeId, month, year) {
   const employee = await Employee.findOne({ where: { employee_id: employeeId } });
@@ -37,20 +39,15 @@ async function buildPayslipData(employeeId, month, year) {
   const monthLabel = getMonthLabel(month, year);
   const payrollDuration = getPayrollDuration(month, year);
   const amountInWords = amountToWords(calc.netPay);
+  const layout = buildPayslipLayout({
+    company, employee, salaryData, calc, monthLabel, payrollDuration, amountInWords,
+  });
 
-  return { employee, salaryData, calc, monthLabel, payrollDuration, amountInWords };
+  return { employee, salaryData, calc, monthLabel, payrollDuration, amountInWords, layout };
 }
 
-function buildPayslipHtml(data) {
-  return renderPayslipHtml({
-    company,
-    employee: data.employee,
-    salaryData: data.salaryData,
-    monthLabel: data.monthLabel,
-    payrollDuration: data.payrollDuration,
-    calc: data.calc,
-    amountInWords: data.amountInWords,
-  });
+function buildPayslipHtml(data, options) {
+  return renderPayslipHtml(data.layout, options);
 }
 
 module.exports = { buildPayslipData, buildPayslipHtml, NotFoundError };

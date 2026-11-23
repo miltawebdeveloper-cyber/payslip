@@ -92,6 +92,16 @@ All math lives in one place: `backend/src/services/payrollCalculationService.js`
 
 The same function is used for the live preview and for PDF generation, so they can never disagree.
 
+## What appears on a payslip
+
+Each payslip is built only from the selected employee's own records, and shows only the fields that record has data for. The rules live in one place, `backend/src/services/payslipLayoutService.js`, and the live preview, the PDF download (single and ZIP) and **Print** all render its output, so a field shows in all of them or in none.
+
+- **Employee details and attendance** (Designation, Date of Joining, Bank, PAN, ESIC No, UAN No, Month/Paid Days, …) appear only when filled in. Blank cells and placeholders such as `-`, `NA` or `N/A` count as not provided, and a day count of 0 is treated as blank (as the Excel import already does).
+- **Earnings and deductions** appear only when the amount is non-zero. Deductions also follow the Payroll Type: ESIC is shown only for `PF + ESI`, and `No Deduction` payslips have no deductions column at all.
+- Hidden fields leave no empty row, `-` or blank cell behind: the details grid, the columns and the totals adjust on their own. The visible lines always add up to Gross Earnings / Gross Deductions.
+
+**Print** sends the exact HTML the PDF is rendered from to the browser's print dialog, and nothing is saved. The PDF download still records each payslip in the `payslips` table, as before.
+
 ## Company details on the payslip
 
 Set these in `backend/.env` (see `.env.example`):
@@ -103,22 +113,71 @@ COMPANY_PHONE=
 COMPANY_LOGO_URL=   # optional image URL; the bundled Milta logo (backend/src/assets/logo.svg) is used if left blank
 ```
 
+## Google Sheets & Drive Integration
+
+The application integrates with your personal Google account:
+
+1. **Google Sheets Integration:**
+   - Automatically maintains all employee salary records in a dedicated Google Spreadsheet (`Payslip Generator - Salary Records`) created directly under your personal account.
+   - Syncs automatically when:
+     - New salary records are imported from Excel.
+     - Single records are added or updated in the table.
+     - Records are deleted or bulk-deleted.
+   - Includes a **Google Sheet** button to view the live sheet directly in your browser, and a **Sync Sheet** button for instant manual sync.
+
+2. **Google Drive Storage:**
+   - Automatically creates a main folder named `Payslip Generator` in your personal Google Drive.
+   - Contains a dedicated `Payslips` subfolder.
+   - Saves every generated employee payslip PDF into month-specific subfolders (e.g. `Payslips / September 2026 / Payslip_EMP001_September_2026.pdf`).
+   - Re-generating a payslip updates the existing file in Drive rather than creating duplicates.
+   - A **Google Drive** button in the Payslip Generator allows direct one-click navigation to your stored payslips.
+
+### Setting Up Your Personal Google Account
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/) and create a project (e.g. `Payslip Generator`).
+2. Navigate to **APIs & Services > Library** and enable:
+   - **Google Sheets API**
+   - **Google Drive API**
+3. Navigate to **APIs & Services > OAuth consent screen**:
+   - Choose **External** (or Internal for Workspace).
+   - Enter your email address.
+   - Under Scopes, add `.../auth/spreadsheets` and `.../auth/drive`.
+   - Under Test Users, add your personal Google account email.
+4. Navigate to **APIs & Services > Credentials**:
+   - Click **Create Credentials > OAuth client ID**.
+   - Application type: **Web application**.
+   - Authorized redirect URIs: add `http://localhost:5000/api/google/oauth2callback` (and your Vercel URL `https://<your-project>.vercel.app/api/google/oauth2callback`).
+   - Copy your **Client ID** and **Client Secret**.
+5. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `backend/.env`.
+6. Run the built-in helper script to generate your refresh token:
+   ```bash
+   npm run google:auth
+   ```
+   Open the printed link, sign in with your personal Google account, and copy the `GOOGLE_REFRESH_TOKEN` into `backend/.env` (and your Vercel environment variables).
+
+---
+
 ## Deployment
 
-### Backend → Render
+### Deploying the Complete Application to Vercel
 
-1. Create a **PostgreSQL** instance on Render (or use any managed Postgres) and note its connection details.
-2. Create a **Web Service** pointed at the `backend/` directory.
-   - Build command: `npm install`
-   - Start command: `npm start`
-3. Set environment variables from `backend/.env.example` (`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_SSL=true`, `CORS_ORIGIN=<your Vercel URL>`, `COMPANY_*`, `NODE_ENV=production`).
-4. Puppeteer downloads its own Chromium at `npm install` time; Render's standard Node runtime supports this out of the box.
+The entire full-stack application (frontend, API routes, database connection, PDF generation, Google Sheets & Drive) is preconfigured for single-repo Vercel deployment with `vercel.json` and `api/index.js`.
 
-### Frontend → Vercel
-
-1. Import the `frontend/` directory as the project root.
-2. Framework preset: Vite.
-3. Set `VITE_API_BASE_URL` to the deployed backend's `/api` URL, e.g. `https://payslip-generator-api.onrender.com/api`.
+1. **Database:** Create a managed PostgreSQL database (such as Neon, Supabase, or AWS RDS). Copy the connection string (`DATABASE_URL`).
+2. **Push Repository:** Push this repository to GitHub/GitLab/Bitbucket.
+3. **Import into Vercel:**
+   - Framework preset: Vite.
+   - Root directory: `./` (leave default).
+4. **Environment Variables on Vercel:**
+   Set the following variables in your Vercel project settings:
+   - `DATABASE_URL` (or `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_SSL=true`)
+   - `NODE_ENV=production`
+   - `GOOGLE_CLIENT_ID`
+   - `GOOGLE_CLIENT_SECRET`
+   - `GOOGLE_REFRESH_TOKEN`
+   - `GOOGLE_REDIRECT_URI=https://<your-vercel-domain>/api/google/oauth2callback`
+   - `COMPANY_NAME`, `COMPANY_ADDRESS`, `COMPANY_PHONE`
+5. **Deploy:** Click **Deploy**. Vercel will build the frontend and serve backend endpoints under `/api/*` as serverless functions. PDF generation runs using `@sparticuz/chromium` in the serverless environment.
 
 ## A note on access control
 

@@ -2,6 +2,10 @@ node_modules/
 dist/
 .env
 .env.local
+service-account.json
+backend/service-account.json
+credentials*.json
+backend/credentials*.json
 backend/uploads/*
 !backend/uploads/.gitkeep
 backend/generated-pdfs/*

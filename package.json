@@ -2,12 +2,18 @@
   "name": "payslip-generator",
   "private": true,
   "version": "1.0.0",
-  "description": "Payslip Generator - Salary Data + Payslip Generator modules",
+  "description": "Payslip Generator - Salary Data + Payslip Generator modules with Google Sheets & Drive Integration",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
   "scripts": {
+    "build": "npm run build --prefix frontend",
     "install:all": "npm install --prefix backend && npm install --prefix frontend",
     "dev:backend": "npm run dev --prefix backend",
     "dev:frontend": "npm run dev --prefix frontend",
-    "dev": "concurrently -n backend,frontend -c green,cyan \"npm:dev:backend\" \"npm:dev:frontend\""
+    "dev": "concurrently -n backend,frontend -c green,cyan \"npm:dev:backend\" \"npm:dev:frontend\"",
+    "google:auth": "node backend/scripts/generateGoogleToken.js"
   },
   "devDependencies": {
     "concurrently": "^10.0.5"

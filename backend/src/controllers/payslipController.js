@@ -6,6 +6,7 @@ const { buildPayslipData, buildPayslipHtml } = require('../services/payslipServi
 const { renderHtmlToPdf } = require('../services/pdfService');
 const { createZip } = require('../services/zipService');
 const { getMonthLabel } = require('../services/durationService');
+const { uploadPayslipPdf } = require('../services/googleDriveService');
 const { MONTH_NAMES } = require('../config/constants');
 const company = require('../config/company');
 
@@ -66,7 +67,19 @@ const preview = catchAsync(async (req, res) => {
     monthLabel: data.monthLabel,
     payrollDuration: data.payrollDuration,
     amountInWords: data.amountInWords,
+    layout: data.layout,
   });
+});
+
+/**
+ * The exact HTML the PDF is rendered from, set up for the browser's own
+ * print dialog. Nothing is saved: printing is just the preview on paper.
+ */
+const printView = catchAsync(async (req, res) => {
+  const { employeeId, month, year } = req.query;
+  const data = await buildPayslipData(employeeId, parseInt(month, 10), parseInt(year, 10));
+  res.setHeader('Cache-Control', 'no-store');
+  res.type('html').send(buildPayslipHtml(data, { browserPrint: true }));
 });
 
 /**
@@ -80,10 +93,32 @@ async function generatePayslipPdf(employeeId, monthNum, yearNum) {
   const pdfBuffer = await renderHtmlToPdf(html);
 
   const fileName = `Payslip_${data.employee.employee_id}_${MONTH_NAMES[monthNum - 1]}_${yearNum}.pdf`;
-  const pdfDir = path.join(__dirname, '..', '..', 'generated-pdfs');
-  await fs.mkdir(pdfDir, { recursive: true });
-  const filePath = path.join(pdfDir, fileName);
-  await fs.writeFile(filePath, pdfBuffer);
+
+  // Safely write local copy if disk is writable (serverless environments like Vercel have read-only root)
+  try {
+    const pdfDir = path.join(__dirname, '..', '..', 'generated-pdfs');
+    await fs.mkdir(pdfDir, { recursive: true });
+    const filePath = path.join(pdfDir, fileName);
+    await fs.writeFile(filePath, pdfBuffer);
+  } catch (fsErr) {
+    // eslint-disable-next-line no-console
+    console.warn('Local PDF caching skipped (normal in serverless/read-only environment):', fsErr.message);
+  }
+
+  // Automatically store and maintain payslip PDF in Google Drive
+  let driveFile = null;
+  try {
+    driveFile = await uploadPayslipPdf({
+      employee: data.employee,
+      month: monthNum,
+      year: yearNum,
+      pdfBuffer,
+      fileName,
+    });
+  } catch (driveErr) {
+    // eslint-disable-next-line no-console
+    console.warn('Google Drive payslip upload error:', driveErr.message);
+  }
 
   await Payslip.create({
     employee_id: data.employee.id,
@@ -96,7 +131,7 @@ async function generatePayslipPdf(employeeId, monthNum, yearNum) {
     pdf_path: fileName,
   });
 
-  return { fileName, pdfBuffer };
+  return { fileName, pdfBuffer, driveFile };
 }
 
 const generate = catchAsync(async (req, res) => {
@@ -141,4 +176,4 @@ const generateAll = catchAsync(async (req, res) => {
   res.send(createZip(files));
 });
 
-module.exports = { listMonths, listEmployeesForMonth, preview, generate, generateAll };
+module.exports = { listMonths, listEmployeesForMonth, preview, printView, generate, generateAll };

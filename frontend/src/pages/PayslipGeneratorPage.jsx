@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import {
   Box, Stack, TextField, MenuItem, Button, Paper, Typography, CircularProgress, Snackbar, Alert,
-  Autocomplete, InputAdornment, Avatar, Skeleton, Link,
+  Autocomplete, InputAdornment, Avatar, Skeleton, Link, Tooltip,
 } from '@mui/material';
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
 import CalendarMonthOutlinedIcon from '@mui/icons-material/CalendarMonthOutlined';
@@ -12,16 +12,20 @@ import VerifiedOutlinedIcon from '@mui/icons-material/VerifiedOutlined';
 import ChevronLeftRoundedIcon from '@mui/icons-material/ChevronLeftRounded';
 import ChevronRightRoundedIcon from '@mui/icons-material/ChevronRightRounded';
 import FolderZipOutlinedIcon from '@mui/icons-material/FolderZipOutlined';
+import PrintOutlinedIcon from '@mui/icons-material/PrintOutlined';
+import OpenInNewRoundedIcon from '@mui/icons-material/OpenInNewRounded';
 import PageHeader from '../components/PageHeader.jsx';
 import PayslipPreview from '../components/PayslipPreview.jsx';
 import BrandMark from '../components/BrandMark.jsx';
 import { PAYROLL_TYPE_LABELS } from '../utils/constants.js';
 import { formatCurrency } from '../utils/format.js';
 import { downloadBlob } from '../utils/download.js';
+import { printHtmlDocument } from '../utils/print.js';
 import {
-  fetchAvailableMonths, fetchEmployeesForMonth, fetchPayslipPreview, generatePayslipPdf,
+  fetchAvailableMonths, fetchEmployeesForMonth, fetchPayslipPreview, fetchPayslipPrintHtml, generatePayslipPdf,
   generateAllPayslips, getErrorMessage,
 } from '../api/payslipApi.js';
+import { fetchGoogleStatus } from '../api/googleApi.js';
 import { BRAND, HERO_GRADIENT, HEADING_FONT, MARK_GRADIENT } from '../theme.js';
 
 // The two-column layout depends on how wide the content area actually is
@@ -227,10 +231,16 @@ export default function PayslipGeneratorPage() {
   const [preview, setPreview] = useState(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [printing, setPrinting] = useState(false);
   const [generatingAll, setGeneratingAll] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+  const [googleStatus, setGoogleStatus] = useState(null);
 
   const notify = (message, severity = 'success') => setSnackbar({ open: true, message, severity });
+
+  useEffect(() => {
+    fetchGoogleStatus().then(setGoogleStatus).catch(() => {});
+  }, []);
 
   const selectedMonth = months.find((m) => `${m.month}-${m.year}` === selectedMonthKey);
   const selectedEmployee = employees.find((emp) => emp.employee_id === selectedEmployeeId) || null;
@@ -288,11 +298,27 @@ export default function PayslipGeneratorPage() {
     try {
       const { blob, filename } = await generatePayslipPdf(selectedEmployeeId, month, year);
       downloadBlob(blob, filename);
-      notify('Payslip generated successfully');
+      notify('Payslip generated and saved to Google Drive');
     } catch (err) {
       notify(await getErrorMessage(err, 'Failed to generate payslip PDF'), 'error');
     } finally {
       setGenerating(false);
+    }
+  };
+
+  // Prints the same server-rendered document the PDF is made from, so the
+  // printed payslip shows exactly the fields the preview and PDF show.
+  const handlePrint = async () => {
+    if (!selectedMonthKey || !selectedEmployeeId) return;
+    const [month, year] = selectedMonthKey.split('-').map(Number);
+    setPrinting(true);
+    try {
+      const html = await fetchPayslipPrintHtml(selectedEmployeeId, month, year);
+      await printHtmlDocument(html);
+    } catch (err) {
+      notify(await getErrorMessage(err, 'Failed to print the payslip'), 'error');
+    } finally {
+      setPrinting(false);
     }
   };
 
@@ -303,7 +329,7 @@ export default function PayslipGeneratorPage() {
     try {
       const { blob, filename } = await generateAllPayslips(month, year);
       downloadBlob(blob, filename);
-      notify(`${employees.length} payslips downloaded as ${filename}`);
+      notify(`${employees.length} payslips downloaded and saved to Google Drive`);
     } catch (err) {
       notify(await getErrorMessage(err, 'Failed to generate the payslips'), 'error');
     } finally {
@@ -316,6 +342,24 @@ export default function PayslipGeneratorPage() {
       <PageHeader
         title="Payslip Generator"
         subtitle="Pick a pay period and an employee, check the preview, then download the PDF."
+        actions={
+          googleStatus?.drive?.payslipsFolder?.webViewLink ? (
+            <Button
+              variant="outlined"
+              startIcon={<OpenInNewRoundedIcon />}
+              href={googleStatus.drive.payslipsFolder.webViewLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              sx={{
+                color: '#1A73E8',
+                borderColor: '#1A73E8',
+                '&:hover': { borderColor: '#174EA6', bgcolor: 'rgba(26,115,232,0.06)' },
+              }}
+            >
+              Google Drive
+            </Button>
+          ) : null
+        }
       />
 
       <Box sx={{ containerType: 'inline-size', containerName: 'payslip' }}>
@@ -449,14 +493,28 @@ export default function PayslipGeneratorPage() {
 
             <Stack spacing={1}>
               <NetPayCard preview={loadingPreview ? null : preview} periodLabel={selectedMonth?.label} />
-              <Button
-                variant="contained" size="large" fullWidth
-                startIcon={generating ? <CircularProgress size={16} color="inherit" /> : <FileDownloadOutlinedIcon />}
-                disabled={!preview || generating || loadingPreview}
-                onClick={handleGenerate}
-              >
-                {generating ? 'Generating PDF…' : 'Download payslip PDF'}
-              </Button>
+              <Stack direction="row" spacing={1}>
+                <Button
+                  variant="contained" size="large" sx={{ flexGrow: 1, minWidth: 0 }}
+                  startIcon={generating ? <CircularProgress size={16} color="inherit" /> : <FileDownloadOutlinedIcon />}
+                  disabled={!preview || generating || loadingPreview}
+                  onClick={handleGenerate}
+                >
+                  {generating ? 'Generating PDF…' : 'Download payslip PDF'}
+                </Button>
+                <Tooltip title="Print payslip">
+                  <span>
+                    <Button
+                      variant="outlined" size="large" sx={{ minWidth: 0, px: 1.25, height: '100%' }}
+                      disabled={!preview || printing || loadingPreview}
+                      onClick={handlePrint}
+                      aria-label="Print payslip"
+                    >
+                      {printing ? <CircularProgress size={18} color="inherit" /> : <PrintOutlinedIcon />}
+                    </Button>
+                  </span>
+                </Tooltip>
+              </Stack>
               <Button
                 variant="outlined" fullWidth
                 startIcon={generatingAll ? <CircularProgress size={14} color="inherit" /> : <FolderZipOutlinedIcon />}
