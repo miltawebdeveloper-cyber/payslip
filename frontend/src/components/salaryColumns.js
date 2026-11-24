@@ -28,9 +28,12 @@ export const COLUMNS = [
   { key: 'medical_allowances', label: 'Medical', group: 'earnings', align: 'right', width: 95, minWidth: 80, maxWidth: 180, type: 'number' },
   { key: 'special_allowances', label: 'Special', group: 'earnings', align: 'right', width: 95, minWidth: 80, maxWidth: 180, type: 'number' },
   { key: 'night_shift_allowances', label: 'Night Shift', group: 'earnings', align: 'right', width: 100, minWidth: 85, maxWidth: 200, type: 'number' },
+  { key: 'overtime', label: 'Overtime', group: 'earnings', align: 'right', width: 100, minWidth: 85, maxWidth: 200, type: 'number' },
+  { key: 'other_allowances', label: 'Other Allowances', group: 'earnings', align: 'right', width: 130, minWidth: 95, maxWidth: 240, type: 'number' },
   { key: 'other_earnings', label: 'Other Earnings', group: 'earnings', align: 'right', width: 118, minWidth: 95, maxWidth: 220, type: 'number' },
   { key: 'pf_employee', label: 'PF', group: 'deductions', align: 'right', width: 90, minWidth: 70, maxWidth: 160, type: 'number' },
   { key: 'esic_employee', label: 'ESIC', group: 'deductions', align: 'right', width: 90, minWidth: 70, maxWidth: 160, type: 'number' },
+  { key: 'advance', label: 'Advance', group: 'deductions', align: 'right', width: 95, minWidth: 80, maxWidth: 180, type: 'number' },
   { key: 'other_deductions', label: 'Other Deductions', group: 'deductions', align: 'right', width: 130, minWidth: 95, maxWidth: 240, type: 'number' },
 ];
 

@@ -84,6 +84,24 @@ async function callAppsScript(payload) {
   return body;
 }
 
+/**
+ * Code.gs replies to a record list or save with the `fields` its sheet
+ * stores. A deployment older than one of `required` would silently drop
+ * that field's values, so stop with a message that says to redeploy.
+ * `saved` says whether the call already wrote rows (a save) or only read.
+ */
+function assertStoresFields(body, required, { saved = false } = {}) {
+  // A script from before `fields` was added doesn't send it at all.
+  const stored = Array.isArray(body && body.fields) ? new Set(body.fields) : null;
+  const missing = stored ? required.filter((field) => !stored.has(field)) : required;
+  if (missing.length === 0) return;
+  const subject = stored ? missing.map((field) => field.replace(/_/g, ' ')).join(', ') : 'some amounts';
+  const consequence = saved
+    ? `so ${subject} were not saved to the Google Sheet. Save again after redeploying.`
+    : `so it can't store ${subject}.`;
+  throw new AppsScriptError(`The Google Apps Script deployment is older than this app, ${consequence} ${DEPLOY_HINT}`);
+}
+
 /** Uploads a payslip PDF to Drive: Payslips / <Month Year> / <fileName>. */
 async function uploadPayslipPdf({ employee, month, year, pdfBuffer, fileName }) {
   const monthNum = parseInt(month, 10);
@@ -110,6 +128,7 @@ module.exports = {
   isAppsScriptConfigured,
   sheetParams,
   callAppsScript,
+  assertStoresFields,
   uploadPayslipPdf,
   getStatus,
 };

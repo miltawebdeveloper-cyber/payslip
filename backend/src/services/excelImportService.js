@@ -1,7 +1,7 @@
 const XLSX = require('xlsx');
 const { MONTH_NAMES } = require('../config/constants');
 const { daysInMonth } = require('./durationService');
-const { parsePayrollType } = require('./salaryRecordService');
+const { AMOUNT_FIELDS, parsePayrollType } = require('./salaryRecordService');
 const { upsertRecords } = require('./salaryStore');
 
 // Maps a normalized column header to the internal field key it feeds.
@@ -28,9 +28,12 @@ const FIELD_ALIASES = {
   medical_allowances: ['medical allowances', 'medical allowance'],
   special_allowances: ['special allowances', 'special allowance', 'special'],
   night_shift_allowances: ['night shift allowances', 'night shift allowance', 'night shift'],
+  overtime: ['overtime', 'over time', 'ot'],
+  other_allowances: ['other allowances', 'other allowance'],
   other_earnings: ['other earnings'],
   pf_employee: ['provident fund employee', 'pf employee', 'pf'],
   esic_employee: ['esic employee', 'esic'],
+  advance: ['advance', 'advances', 'salary advance'],
   other_deductions: ['other deductions'],
 };
 
@@ -40,8 +43,8 @@ const TEMPLATE_HEADERS = [
   'Employee ID', 'Employee Name', 'Designation', 'Date of Joining', 'Bank Name',
   'Bank Account Number', 'PAN', 'ESIC No', 'UAN No', 'Month', 'Month Days', 'Paid Days',
   'Payroll Type', 'Basic', 'HRA', 'Conveyance Allowances', 'Medical Allowances',
-  'Special Allowances', 'Night Shift Allowances', 'Other Earnings', 'Provident Fund (Employee)',
-  'ESIC (Employee)', 'Other Deductions',
+  'Special Allowances', 'Night Shift Allowances', 'Overtime', 'Other Allowances', 'Other Earnings',
+  'Provident Fund (Employee)', 'ESIC (Employee)', 'Advance', 'Other Deductions',
 ];
 
 function normalizeHeader(value) {
@@ -161,12 +164,8 @@ function parseRow(record) {
     errors.push('Payroll Type must be one of "PF + ESI", "PF Only" or "No Deduction"');
   }
 
-  const numericFields = [
-    'basic', 'hra', 'conveyance_allowances', 'medical_allowances', 'special_allowances',
-    'night_shift_allowances', 'other_earnings', 'pf_employee', 'esic_employee', 'other_deductions',
-  ];
   const numericValues = {};
-  numericFields.forEach((field) => {
+  AMOUNT_FIELDS.forEach((field) => {
     const { value, error } = parseNumber(record[field]);
     if (error) errors.push(`${field.replace(/_/g, ' ')} ${error}`);
     numericValues[field] = value ?? 0;
@@ -302,7 +301,7 @@ function generateTemplateWorkbook() {
   const exampleRow = [
     'MAS21058', 'Karthikayani. G', 'Executive FED', '2025-10-13', 'IDFC FIRST BANK',
     '10250931449', 'BNLPH1126B', '5611440181', '102260097818', 'April-2026', 30, 30,
-    'PF + ESI', 9019, 3608, 1600, 1250, 2561, 600, 0, 1732, 136, 0,
+    'PF + ESI', 9019, 3608, 1600, 1250, 2561, 600, 0, 0, 0, 1732, 136, 0, 0,
   ];
 
   const worksheet = XLSX.utils.aoa_to_sheet([TEMPLATE_HEADERS, exampleRow]);

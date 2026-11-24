@@ -14,7 +14,8 @@ const TEXT_FIELDS = ['designation', 'bank_name', 'bank_account_number', 'pan', '
 
 const AMOUNT_FIELDS = [
   'basic', 'hra', 'conveyance_allowances', 'medical_allowances', 'special_allowances',
-  'night_shift_allowances', 'other_earnings', 'pf_employee', 'esic_employee', 'other_deductions',
+  'night_shift_allowances', 'overtime', 'other_allowances', 'other_earnings',
+  'pf_employee', 'esic_employee', 'advance', 'other_deductions',
 ];
 
 function isBlank(value) {

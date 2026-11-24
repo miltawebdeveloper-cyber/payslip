@@ -67,12 +67,15 @@ const EARNING_FIELDS = [
   { key: 'medicalAllowances', label: 'Medical allowances' },
   { key: 'specialAllowances', label: 'Special Allowances' },
   { key: 'nightShiftAllowances', label: 'Night Shift Allowances' },
+  { key: 'overtime', label: 'Overtime' },
+  { key: 'otherAllowances', label: 'Other Allowances' },
   { key: 'otherEarnings', label: 'Other Earnings' },
 ];
 
 const DEDUCTION_FIELDS = [
   { key: 'esicEmployee', label: 'ESIC (Employee)' },
   { key: 'pfEmployee', label: 'Provident Fund (Employee)' },
+  { key: 'advance', label: 'Advance' },
   { key: 'otherDeductions', label: 'Other Deductions' },
 ];
 
@@ -80,8 +83,8 @@ const DEDUCTION_FIELDS = [
 // mirroring calculatePayslip(). A deduction outside this list is never shown,
 // even when the record holds a value for it, because it isn't charged.
 const DEDUCTIONS_BY_PAYROLL_TYPE = {
-  [PAYROLL_TYPES.PF_ESI]: ['esicEmployee', 'pfEmployee', 'otherDeductions'],
-  [PAYROLL_TYPES.PF_ONLY]: ['pfEmployee', 'otherDeductions'],
+  [PAYROLL_TYPES.PF_ESI]: ['esicEmployee', 'pfEmployee', 'advance', 'otherDeductions'],
+  [PAYROLL_TYPES.PF_ONLY]: ['pfEmployee', 'advance', 'otherDeductions'],
   [PAYROLL_TYPES.NO_DEDUCTION]: [],
 };
 

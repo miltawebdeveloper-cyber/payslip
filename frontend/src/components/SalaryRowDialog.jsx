@@ -37,16 +37,20 @@ const EMPTY_FORM = {
   medical_allowances: 0,
   special_allowances: 0,
   night_shift_allowances: 0,
+  overtime: 0,
+  other_allowances: 0,
   other_earnings: 0,
   pf_employee: 0,
   esic_employee: 0,
+  advance: 0,
   other_deductions: 0,
 };
 
 const NUMERIC_FIELDS = [
   'year', 'month_days', 'paid_days', 'basic', 'hra', 'conveyance_allowances',
-  'medical_allowances', 'special_allowances', 'night_shift_allowances', 'other_earnings',
-  'pf_employee', 'esic_employee', 'other_deductions',
+  'medical_allowances', 'special_allowances', 'night_shift_allowances', 'overtime',
+  'other_allowances', 'other_earnings', 'pf_employee', 'esic_employee', 'advance',
+  'other_deductions',
 ];
 
 // Short labels: the section titles already say Earnings / Deductions, and they
@@ -58,12 +62,15 @@ const EARNING_FIELDS = [
   { key: 'medical_allowances', label: 'Medical' },
   { key: 'special_allowances', label: 'Special' },
   { key: 'night_shift_allowances', label: 'Night Shift' },
+  { key: 'overtime', label: 'Overtime' },
+  { key: 'other_allowances', label: 'Other Allowances' },
   { key: 'other_earnings', label: 'Other Earnings' },
 ];
 
 const DEDUCTION_FIELDS = [
   { key: 'pf_employee', label: 'PF (Employee)' },
   { key: 'esic_employee', label: 'ESIC (Employee)' },
+  { key: 'advance', label: 'Advance' },
   { key: 'other_deductions', label: 'Other Deductions' },
 ];
 

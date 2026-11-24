@@ -117,9 +117,12 @@ function renderCell(row, key) {
     case 'medical_allowances':
     case 'special_allowances':
     case 'night_shift_allowances':
+    case 'overtime':
+    case 'other_allowances':
     case 'other_earnings':
     case 'pf_employee':
     case 'esic_employee':
+    case 'advance':
     case 'other_deductions':
       return <Amount value={row[key]} />;
     default:

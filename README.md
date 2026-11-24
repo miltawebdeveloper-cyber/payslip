@@ -79,10 +79,11 @@ npm run dev
 
 The **Salary Records** tab holds one row per employee per month. **Employee ID + Month + Year** identifies a row, so an employee can't have two rows for the same month.
 
-- Row 1 is the header row. The app expects its columns in this order: `Employee ID, Employee Name, Designation, Date of Joining, Bank Name, Bank Account Number, PAN, ESIC No, UAN No, Month, Year, Month Days, Paid Days, Payroll Type, Basic, HRA, Conveyance Allowances, Medical Allowances, Special Allowances, Night Shift Allowances, Other Earnings, PF Employee, ESIC Employee, Other Deductions, Gross Earnings, Gross Deductions, Net Pay, Last Updated`. If they are renamed or reordered, the app stops with an error that says which column is wrong.
+- Row 1 is the header row. The app finds its columns by header name, so they can be in any order and header case or punctuation doesn't matter: `Employee ID, Employee Name, Designation, Date of Joining, Bank Name, Bank Account Number, PAN, ESIC No, UAN No, Month, Year, Month Days, Paid Days, Payroll Type, Basic, HRA, Conveyance Allowances, Medical Allowances, Special Allowances, Night Shift Allowances, Overtime, Other Allowances, Other Earnings, PF Employee, ESIC Employee, Advance, Other Deductions, Gross Earnings, Gross Deductions, Net Pay, Last Updated`. **Overtime** is also recognised as `OT`, **Other Allowances** as `Other Allowance`, and **Advance** as `Salary Advance`. If a column is renamed, deleted or appears twice, the app stops with an error that names it.
+- If the sheet doesn't have the **Overtime**, **Other Allowances** or **Advance** column yet, the Apps Script inserts it (empty, read as 0) next to its neighbouring column the next time it opens the sheet. Columns you've already added yourself are used where they are.
 - You can edit values directly in the sheet. The app reads them on the next request. Text columns (IDs, bank details, dates, Month, Payroll Type) are stored as plain text, so leading zeros are kept.
 - **Gross Earnings**, **Gross Deductions** and **Net Pay** are written by the app for reference. The app always recalculates them from the amounts, so a hand edit to the amounts is picked up even if these columns are stale.
-- Don't put formulas in the app's columns: saving a record rewrites their values. Columns you add to the right of **Last Updated** are left alone.
+- Don't put formulas in the app's columns: saving a record rewrites their values. Any column of your own, wherever it sits, is left alone.
 - Employee details (name, designation, bank, PAN, …) are shared by all of an employee's months: saving any row for an employee updates those columns on their other rows too.
 - Writes go through a lock in the Apps Script, so two people saving at the same time can't overwrite each other's changes.
 
@@ -90,7 +91,7 @@ The **Salary Records** tab holds one row per employee per month. **Employee ID +
 
 Module 1's **Import Excel** button expects a workbook whose first sheet has a header row with these columns (use **Download Template** in the Import dialog to get a ready-made file with example data):
 
-`Employee ID, Employee Name, Designation, Date of Joining, Bank Name, Bank Account Number, PAN, ESIC No, UAN No, Month, Month Days, Paid Days, Payroll Type, Basic, HRA, Conveyance Allowances, Medical Allowances, Special Allowances, Night Shift Allowances, Other Earnings, Provident Fund (Employee), ESIC (Employee), Other Deductions`
+`Employee ID, Employee Name, Designation, Date of Joining, Bank Name, Bank Account Number, PAN, ESIC No, UAN No, Month, Month Days, Paid Days, Payroll Type, Basic, HRA, Conveyance Allowances, Medical Allowances, Special Allowances, Night Shift Allowances, Overtime, Other Allowances, Other Earnings, Provident Fund (Employee), ESIC (Employee), Advance, Other Deductions`
 
 - `Month` accepts formats like `April-2026`, `April 2026` or `04-2026`.
 - `Payroll Type` accepts `PF + ESI`, `PF Only` or `No Deduction` (case-insensitive).
@@ -101,10 +102,10 @@ Module 1's **Import Excel** button expects a workbook whose first sheet has a he
 
 All math lives in one place: `backend/src/services/payrollCalculationService.js`.
 
-- **Gross Earnings** = Basic + HRA + Conveyance + Medical + Special + Night Shift Allowances + Other Earnings
+- **Gross Earnings** = Basic + HRA + Conveyance + Medical + Special + Night Shift Allowances + Overtime + Other Allowances + Other Earnings
 - **Gross Deductions** depends on the row's Payroll Type:
-  - `PF + ESI` → Provident Fund + ESIC + Other Deductions
-  - `PF Only` → Provident Fund + Other Deductions
+  - `PF + ESI` → Provident Fund + ESIC + Advance + Other Deductions
+  - `PF Only` → Provident Fund + Advance + Other Deductions
   - `No Deduction` → 0
 - **Net Pay** = Gross Earnings − Gross Deductions
 

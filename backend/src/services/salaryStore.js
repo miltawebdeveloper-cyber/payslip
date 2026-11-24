@@ -7,7 +7,7 @@
  * A record is identified by Employee ID + Year + Month. Its `id`, used in
  * API URLs and table selections, is "<employee_id>~<year>~<month>".
  */
-const { callAppsScript, sheetParams } = require('./googleAppsScriptService');
+const { callAppsScript, assertStoresFields, sheetParams } = require('./googleAppsScriptService');
 const { calculatePayslip } = require('./payrollCalculationService');
 const {
   AMOUNT_FIELDS, TEXT_FIELDS, cleanText, toNumber, toDateOnly, parsePayrollType,
@@ -113,6 +113,7 @@ function savedRecord(payload) {
 /** Every salary record in the sheet. Duplicate rows keep the first one. */
 async function listRecords() {
   const res = await callAppsScript({ action: 'listRecords', ...sheetParams() });
+  assertStoresFields(res, AMOUNT_FIELDS);
   const seen = new Set();
   const records = [];
   (res.records || []).forEach((raw) => {
@@ -136,6 +137,7 @@ async function upsertItems(items) {
     ...sheetParams(),
     items: items.map((item) => ({ ...item, record: toSheet(item.record) })),
   });
+  assertStoresFields(res, AMOUNT_FIELDS, { saved: true });
   const results = res.results || [];
   if (results.length !== items.length) {
     throw new StoreError('Google Sheet returned an unexpected reply while saving.', 502);

@@ -21,11 +21,15 @@
  * random value>, and set GOOGLE_APPS_SCRIPT_KEY to the same value in the
  * backend's environment.
  *
- * Sheet layout: row 1 holds the headers below, in this order, and every
- * row under it is one employee's salary for one month (Employee ID + Month
- * + Year is unique). The app owns these columns: don't rename, reorder or
- * put formulas in them. Columns added to the right of "Last Updated" are
- * left alone.
+ * Sheet layout: row 1 holds the headers below, and every row under it is
+ * one employee's salary for one month (Employee ID + Month + Year is
+ * unique). Columns are found by their header, not their position, so they
+ * can be in any order and your own columns can sit between them; header
+ * case and punctuation don't matter. The app owns these columns: don't
+ * rename them or put formulas in them. Any other column is left alone.
+ * A column marked `added` that the sheet doesn't have yet is inserted,
+ * empty, next to the column listed before it the next time the app opens
+ * the sheet.
  */
 
 const SHEET_NAME = 'Salary Records';
@@ -45,6 +49,8 @@ const PAYROLL_TYPE_LABELS = {
 
 // text: stored as plain text so values like "000123" or "2025-04-01" are
 // kept exactly as written. format: number format for numeric columns.
+// aliases: other headers the column is recognised by. added: the column
+// came after the first release, so an older sheet may not have it yet.
 const COLUMNS = [
   { header: 'Employee ID', field: 'employee_id', text: true },
   { header: 'Employee Name', field: 'employee_name', text: true },
@@ -66,9 +72,12 @@ const COLUMNS = [
   { header: 'Medical Allowances', field: 'medical_allowances', format: MONEY_FORMAT },
   { header: 'Special Allowances', field: 'special_allowances', format: MONEY_FORMAT },
   { header: 'Night Shift Allowances', field: 'night_shift_allowances', format: MONEY_FORMAT },
+  { header: 'Overtime', field: 'overtime', format: MONEY_FORMAT, added: true, aliases: ['Over Time', 'OT', 'O.T.'] },
+  { header: 'Other Allowances', field: 'other_allowances', format: MONEY_FORMAT, added: true, aliases: ['Other Allowance'] },
   { header: 'Other Earnings', field: 'other_earnings', format: MONEY_FORMAT },
   { header: 'PF Employee', field: 'pf_employee', format: MONEY_FORMAT },
   { header: 'ESIC Employee', field: 'esic_employee', format: MONEY_FORMAT },
+  { header: 'Advance', field: 'advance', format: MONEY_FORMAT, added: true, aliases: ['Advances', 'Salary Advance', 'Advance Deduction', 'Advance Recovery'] },
   { header: 'Other Deductions', field: 'other_deductions', format: MONEY_FORMAT },
   { header: 'Gross Earnings', field: 'gross_earnings', format: MONEY_FORMAT },
   { header: 'Gross Deductions', field: 'gross_deductions', format: MONEY_FORMAT },
@@ -77,6 +86,9 @@ const COLUMNS = [
 ];
 
 const HEADERS = COLUMNS.map(function (c) { return c.header; });
+// Sent with every record list and save, so the backend can tell when this
+// deployment is older than the fields it needs stored.
+const FIELDS = COLUMNS.map(function (c) { return c.field; });
 const COL = {};
 COLUMNS.forEach(function (c, i) { COL[c.field] = i; });
 
@@ -160,8 +172,8 @@ function openRecordsSheet(data) {
   const folder = getFolder(data.folderId);
   const ss = getOrCreateSpreadsheet(folder, data.sheetTitle || DEFAULT_SHEET_TITLE);
   const sheet = ss.getSheetByName(SHEET_NAME) || ss.getSheets()[0];
-  ensureHeaders(sheet);
-  return { ss: ss, sheet: sheet, tz: ss.getSpreadsheetTimeZone() };
+  const cols = mapColumns(sheet);
+  return { ss: ss, sheet: sheet, tz: ss.getSpreadsheetTimeZone(), cols: cols };
 }
 
 /** getRange can't reach past the sheet's size, so grow it first (a new sheet has 26 columns). */
@@ -170,7 +182,15 @@ function ensureSize(sheet, rows, cols) {
   if (sheet.getMaxColumns() < cols) sheet.insertColumnsAfter(sheet.getMaxColumns(), cols - sheet.getMaxColumns());
 }
 
-function ensureHeaders(sheet) {
+/**
+ * Finds every app column in row 1 by its header, and returns, for each
+ * entry of COLUMNS, the 1-based sheet column it is in. A blank sheet gets
+ * the header row. A missing `added` column is inserted next to the column
+ * listed before it in COLUMNS; its cells start empty, which the app reads
+ * as 0. Throws, before touching row 1 or the data, if any other column is
+ * missing or a header appears twice.
+ */
+function mapColumns(sheet) {
   ensureSize(sheet, 1, HEADERS.length);
   if (sheet.getLastRow() === 0) {
     const headerRange = sheet.getRange(1, 1, 1, HEADERS.length);
@@ -180,18 +200,58 @@ function ensureHeaders(sheet) {
     headerRange.setFontWeight('bold');
     headerRange.setHorizontalAlignment('center');
     sheet.setFrozenRows(1);
-    return;
+    return COLUMNS.map(function (c, i) { return i + 1; });
   }
-  const actual = sheet.getRange(1, 1, 1, HEADERS.length).getDisplayValues()[0];
-  for (let i = 0; i < HEADERS.length; i++) {
-    if (String(actual[i]).trim().toLowerCase() !== HEADERS[i].toLowerCase()) {
+
+  let cols = findColumns(sheet);
+  const missing = COLUMNS.filter(function (c, i) { return cols[i] === 0 && !c.added; });
+  if (missing.length > 0) {
+    throw new Error(
+      'Sheet "' + sheet.getName() + '" has no column headed '
+      + missing.map(function (c) { return '"' + c.header + '"'; }).join(', ')
+      + ' in row 1. Add it back (columns can be in any order).'
+    );
+  }
+
+  COLUMNS.forEach(function (col, i) {
+    if (cols[i] !== 0) return;
+    const after = cols[i - 1];
+    sheet.insertColumnAfter(after);
+    sheet.getRange(1, after).copyTo(sheet.getRange(1, after + 1), SpreadsheetApp.CopyPasteType.PASTE_FORMAT, false);
+    sheet.getRange(1, after + 1).setValue(col.header);
+    cols = findColumns(sheet);
+  });
+  return cols;
+}
+
+/** Each COLUMNS entry's 1-based sheet column, from row 1; 0 where it's missing. */
+function findColumns(sheet) {
+  const width = Math.max(sheet.getLastColumn(), 1);
+  const header = sheet.getRange(1, 1, 1, width).getDisplayValues()[0].map(normHeader);
+  return COLUMNS.map(function (col) {
+    const names = [col.header].concat(col.aliases || []).map(normHeader);
+    const hits = [];
+    header.forEach(function (h, j) { if (names.indexOf(h) !== -1) hits.push(j + 1); });
+    if (hits.length > 1) {
       throw new Error(
-        'Sheet "' + sheet.getName() + '" has "' + actual[i] + '" in column ' + (i + 1)
-        + ' of the header row where "' + HEADERS[i] + '" is expected. Restore row 1 to: '
-        + HEADERS.join(', ')
+        'Sheet "' + sheet.getName() + '" has more than one "' + col.header + '" column (columns '
+        + hits.map(columnLetter).join(', ') + ' of row 1). Keep one of them.'
       );
     }
-  }
+    return hits.length ? hits[0] : 0;
+  });
+}
+
+/** "Other  allowances", "OTHER-ALLOWANCES" and "Other Allowances" all match. */
+function normHeader(value) {
+  return String(value === null || value === undefined ? '' : value)
+    .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function columnLetter(n) {
+  let s = '';
+  for (; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(65 + ((n - 1) % 26)) + s;
+  return s;
 }
 
 function cellToText(value, tz) {
@@ -201,33 +261,60 @@ function cellToText(value, tz) {
 }
 
 /**
- * All data rows (row 2 down) for the app's columns. Blank rows are kept so
- * index i is always sheet row i + 2. Text columns come back as strings.
+ * All data rows (row 2 down), each as an array in COLUMNS order whatever
+ * order the sheet has them in. Blank rows are kept so index i is always
+ * sheet row i + 2. Text columns come back as strings.
  */
-function readRows(sheet, tz) {
-  const lastRow = sheet.getLastRow();
+function readRows(ctx) {
+  const lastRow = ctx.sheet.getLastRow();
   if (lastRow < 2) return [];
-  const values = sheet.getRange(2, 1, lastRow - 1, HEADERS.length).getValues();
-  return values.map(function (row) {
-    return row.map(function (value, i) {
+  const width = Math.max.apply(null, ctx.cols);
+  const values = ctx.sheet.getRange(2, 1, lastRow - 1, width).getValues();
+  return values.map(function (sheetRow) {
+    return COLUMNS.map(function (col, i) {
+      const value = sheetRow[ctx.cols[i] - 1];
       if (i === COL.month) {
         const m = parseMonth(value);
-        return m ? MONTH_NAMES[m - 1] : cellToText(value, tz);
+        return m ? MONTH_NAMES[m - 1] : cellToText(value, ctx.tz);
       }
-      return COLUMNS[i].text ? cellToText(value, tz) : value;
+      return col.text ? cellToText(value, ctx.tz) : value;
     });
   });
 }
 
-/** Writes rows back from row 2 down, text formats first so "000123" stays text. */
-function writeRows(sheet, rows) {
+/**
+ * Writes rows (in COLUMNS order) back from row 2 down, into the app's
+ * columns only, so other columns keep their values and formulas. Text
+ * formats go on first so "000123" stays text.
+ */
+function writeRows(ctx, rows) {
   if (rows.length === 0) return;
-  ensureSize(sheet, rows.length + 1, HEADERS.length);
+  const sheet = ctx.sheet;
+  ensureSize(sheet, rows.length + 1, Math.max.apply(null, ctx.cols));
   COLUMNS.forEach(function (col, i) {
     const format = col.text ? '@' : col.format;
-    if (format) sheet.getRange(2, i + 1, rows.length, 1).setNumberFormat(format);
+    if (format) sheet.getRange(2, ctx.cols[i], rows.length, 1).setNumberFormat(format);
   });
-  sheet.getRange(2, 1, rows.length, HEADERS.length).setValues(rows);
+  columnRuns(ctx.cols).forEach(function (run) {
+    const values = rows.map(function (row) { return run.map(function (i) { return row[i]; }); });
+    sheet.getRange(2, ctx.cols[run[0]], rows.length, run.length).setValues(values);
+  });
+}
+
+/**
+ * COLUMNS indexes grouped into runs that sit side by side in the sheet,
+ * left to right, so each run is written with one call.
+ */
+function columnRuns(cols) {
+  const order = cols.map(function (c, i) { return i; })
+    .sort(function (a, b) { return cols[a] - cols[b]; });
+  const runs = [];
+  order.forEach(function (i) {
+    const run = runs[runs.length - 1];
+    if (run && cols[run[run.length - 1]] === cols[i] - 1) run.push(i);
+    else runs.push([i]);
+  });
+  return runs;
 }
 
 function normId(value) {
@@ -322,10 +409,10 @@ function handleGetStatus(data) {
 function handleListRecords(data) {
   const ctx = openRecordsSheet(data);
   const records = [];
-  readRows(ctx.sheet, ctx.tz).forEach(function (row, i) {
+  readRows(ctx).forEach(function (row, i) {
     if (normId(row[COL.employee_id])) records.push(rowToRecord(row, i + 2));
   });
-  return { success: true, records: records, sheetUrl: ctx.ss.getUrl() };
+  return { success: true, records: records, fields: FIELDS, sheetUrl: ctx.ss.getUrl() };
 }
 
 /**
@@ -340,7 +427,7 @@ function handleListRecords(data) {
 function handleUpsertRecords(data) {
   return withLock(function () {
     const ctx = openRecordsSheet(data);
-    const rows = readRows(ctx.sheet, ctx.tz);
+    const rows = readRows(ctx);
     const index = {};
     rows.forEach(function (row, i) {
       const k = rowKey(row);
@@ -392,10 +479,10 @@ function handleUpsertRecords(data) {
           row[COL[field]] = source[COL[field]];
         });
       });
-      writeRows(ctx.sheet, rows);
+      writeRows(ctx, rows);
     }
 
-    return { success: true, results: results, sheetUrl: ctx.ss.getUrl() };
+    return { success: true, results: results, fields: FIELDS, sheetUrl: ctx.ss.getUrl() };
   });
 }
 
@@ -410,7 +497,7 @@ function handleDeleteRecords(data) {
     });
 
     const sheetRows = [];
-    readRows(ctx.sheet, ctx.tz).forEach(function (row, i) {
+    readRows(ctx).forEach(function (row, i) {
       if (wanted[rowKey(row)]) sheetRows.push(i + 2);
     });
     if (sheetRows.length === 0) return { success: true, deleted: 0 };

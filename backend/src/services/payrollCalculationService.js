@@ -17,15 +17,18 @@ function calculatePayslip(salaryData) {
   const medicalAllowances = round2(salaryData.medical_allowances);
   const specialAllowances = round2(salaryData.special_allowances);
   const nightShiftAllowances = round2(salaryData.night_shift_allowances);
+  const overtime = round2(salaryData.overtime);
+  const otherAllowances = round2(salaryData.other_allowances);
   const otherEarnings = round2(salaryData.other_earnings);
 
   const pfEmployee = round2(salaryData.pf_employee);
   const esicEmployee = round2(salaryData.esic_employee);
+  const advance = round2(salaryData.advance);
   const otherDeductions = round2(salaryData.other_deductions);
 
   const grossEarnings = round2(
     basic + hra + conveyanceAllowances + medicalAllowances + specialAllowances
-      + nightShiftAllowances + otherEarnings
+      + nightShiftAllowances + overtime + otherAllowances + otherEarnings
   );
 
   let grossDeductions;
@@ -33,13 +36,13 @@ function calculatePayslip(salaryData) {
     case PAYROLL_TYPES.PF_ESI:
     case 'PF + ESI':
     case 'PF_ESI':
-      grossDeductions = round2(pfEmployee + esicEmployee + otherDeductions);
+      grossDeductions = round2(pfEmployee + esicEmployee + advance + otherDeductions);
       break;
     case PAYROLL_TYPES.PF_ONLY:
     case 'PF Only':
     case 'PF ONLY':
     case 'PF_ONLY':
-      grossDeductions = round2(pfEmployee + otherDeductions);
+      grossDeductions = round2(pfEmployee + advance + otherDeductions);
       break;
     case PAYROLL_TYPES.NO_DEDUCTION:
     case 'No Deduction':
@@ -61,11 +64,14 @@ function calculatePayslip(salaryData) {
       medicalAllowances,
       specialAllowances,
       nightShiftAllowances,
+      overtime,
+      otherAllowances,
       otherEarnings,
     },
     deductions: {
       pfEmployee,
       esicEmployee,
+      advance,
       otherDeductions,
     },
     grossEarnings,
