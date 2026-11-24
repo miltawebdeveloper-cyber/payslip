@@ -1,3 +1,5 @@
+const { PAYSLIP_FONT_CSS, PAYSLIP_FONT_FAMILY } = require('./payslipFonts');
+
 function formatCurrency(amount) {
   const value = Number(amount) || 0;
   return new Intl.NumberFormat('en-IN', {
@@ -31,23 +33,25 @@ function renderHeader(company) {
     </header>`;
 }
 
-// Pay table column widths (%). Like the details table, each value sits in
-// its own left-aligned column after a divider. The first amount column starts
-// at 30%, where the net pay values start too, and the halves split at 50%.
-const PAY_COLUMNS = {
-  1: [30, 70],
-  2: [30, 20, 30, 20],
+// One column grid for every table (widths in %): label | value | label |
+// value, so each divider lines up from the details table down to net pay.
+// Tables with a single label/value pair per row use the first label column
+// and let the value run to the right edge.
+const GRID = {
+  2: [26, 24, 26, 24],
+  1: [26, 74],
 };
 
 function colgroup(widths) {
   return `<colgroup>${widths.map((w) => `<col style="width:${w}%" />`).join('')}</colgroup>`;
 }
 
-// The right half of a two-section table starts with a stronger divider.
+// The right half of a two-pair table starts with a stronger divider.
 function splitAttr(index) {
   return index > 0 ? ' class="split"' : '';
 }
 
+// Every table: <th> is a label, <td> the value it labels.
 function renderDetails(detailRows) {
   if (!detailRows.length) return '';
   const rows = detailRows
@@ -61,13 +65,13 @@ function renderDetails(detailRows) {
 
   return `
     <table class="block grid details">
-      ${colgroup([22, 28, 22, 28])}
+      ${colgroup(GRID[2])}
       ${rows}
     </table>`;
 }
 
 function payCells(sectionIndex, label, amount) {
-  return `<td${splitAttr(sectionIndex)}>${escapeHtml(label)}</td><td class="amount">${escapeHtml(amount)}</td>`;
+  return `<th${splitAttr(sectionIndex)}>${escapeHtml(label)}</th><td>${escapeHtml(amount)}</td>`;
 }
 
 /**
@@ -80,7 +84,7 @@ function renderPaySections(paySections) {
   const rowCount = Math.max(...paySections.map((section) => section.items.length));
 
   const head = paySections
-    .map((section, i) => `<th${splitAttr(i)}>${escapeHtml(section.title)}</th><th class="amount">Amount</th>`)
+    .map((section, i) => `<th${splitAttr(i)}>${escapeHtml(section.title)}</th><th class="value">Amount</th>`)
     .join('');
   const items = Array.from({ length: rowCount }, (_, row) => {
     const cells = paySections
@@ -97,7 +101,7 @@ function renderPaySections(paySections) {
 
   return `
     <table class="block grid pay">
-      ${colgroup(PAY_COLUMNS[paySections.length])}
+      ${colgroup(GRID[paySections.length])}
       <tr class="pay-head">${head}</tr>
       ${items}
       <tr class="pay-total">${totals}</tr>
@@ -105,19 +109,18 @@ function renderPaySections(paySections) {
 }
 
 /**
- * Net pay as two label/value rows: the amount, then the amount in words.
- * Like the details table: label, divider, then the value left-aligned, in
- * line with the Earnings amounts above.
+ * Net pay as two label/value rows: the amount, then the amount in words,
+ * with the values in line with the values of the tables above.
  */
 function renderNetPay(netPay) {
   const words = netPay.inWords
-    ? `<tr><th>Net Pay in Words</th><td class="net-value net-words">${escapeHtml(netPay.inWords)}</td></tr>`
+    ? `<tr><th>Net Pay in Words</th><td class="net-words">${escapeHtml(netPay.inWords)}</td></tr>`
     : '';
 
   return `
     <table class="block grid net">
-      ${colgroup([30, 70])}
-      <tr><th>${escapeHtml(netPay.label)}</th><td class="net-value net-amount">${formatCurrency(netPay.amount)}</td></tr>
+      ${colgroup(GRID[1])}
+      <tr><th>${escapeHtml(netPay.label)}</th><td class="net-amount">${formatCurrency(netPay.amount)}</td></tr>
       ${words}
     </table>`;
 }
@@ -143,6 +146,7 @@ function renderPayslipHtml(layout, { browserPrint = false } = {}) {
 <title>${escapeHtml(layout.documentTitle)}</title>
 <style>
   /* Keep in sync with the live preview: frontend/src/components/PayslipPreview.jsx */
+  ${PAYSLIP_FONT_CSS}
   :root {
     --ink: #1F2328;
     --ink-soft: #5B636D;
@@ -155,10 +159,12 @@ function renderPayslipHtml(layout, { browserPrint = false } = {}) {
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; }
+  /* No body padding: the PDF page margins (pdfService) and the print
+     margins (BROWSER_PRINT_CSS) already frame the sheet. */
   body {
-    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-family: ${PAYSLIP_FONT_FAMILY};
     color: var(--ink);
-    padding: 24px;
+    padding: 0;
     font-size: 11.5px;
     line-height: 1.45;
     background: #fff;
@@ -181,35 +187,37 @@ function renderPayslipHtml(layout, { browserPrint = false } = {}) {
     border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
   }
 
-  .content { padding: 16px 18px 18px; }
+  .content { padding: 16px; }
   .block { border: 1px solid var(--frame); }
   .block + .block { margin-top: 14px; }
 
   /* One cell style for every table, with a whole-pixel line height, so each
-     row is exactly the same height and every row line lands on a pixel. */
+     row is exactly the same height and every row line lands on a pixel.
+     Labels (<th>) are larger and bolder than their values (<td>), and every
+     value sits left-aligned after a divider. */
   table.grid { width: 100%; border-collapse: collapse; table-layout: fixed; }
   .grid th, .grid td {
-    padding: 7px 12px; font-size: 11.5px; line-height: 16px; font-weight: 400;
+    padding: 7px 10px; line-height: 16px; color: var(--ink);
     text-align: left; vertical-align: middle; overflow-wrap: anywhere;
   }
+  .grid th { font-size: 11.5px; font-weight: 600; }
+  .grid td { font-size: 11px; font-weight: 400; border-left: 1px solid var(--line); }
   .grid tr + tr > * { border-top: 1px solid var(--line); }
   .grid .split { border-left: 1px solid var(--frame); }
-  .grid .amount { border-left: 1px solid var(--line); white-space: nowrap; font-variant-numeric: tabular-nums; }
-
-  .details th { color: var(--ink-soft); }
-  .details td { font-weight: 600; border-left: 1px solid var(--line); }
+  .grid .value { border-left: 1px solid var(--line); }
+  .pay td { white-space: nowrap; font-variant-numeric: tabular-nums; }
 
   .grid .pay-head > * {
-    background: var(--band); color: var(--ink-soft); font-size: 10.5px; font-weight: 700;
-    letter-spacing: 0.06em; text-transform: uppercase;
+    background: var(--band); font-size: 11.5px; font-weight: 700;
+    letter-spacing: 0.05em; text-transform: uppercase;
   }
   .grid .pay-total > * { background: var(--band-strong); font-weight: 700; }
 
   .net th, .net td { padding-top: 9px; padding-bottom: 9px; }
-  .net th { font-weight: 700; }
-  .grid .net-value { border-left: 1px solid var(--line); }
-  .grid .net-amount { font-size: 14px; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
-  .grid .net-words { font-weight: 600; }
+  .net th { font-size: 12.5px; font-weight: 700; }
+  .net td { font-size: 12px; font-weight: 700; }
+  .net .net-amount { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .net .net-words { font-weight: 600; }
 
   .note { text-align: center; font-size: 10px; font-style: italic; color: var(--ink-muted); padding: 0 12px 14px; }
   ${browserPrint ? BROWSER_PRINT_CSS : ''}

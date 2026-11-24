@@ -1,5 +1,11 @@
 import { Fragment } from 'react';
 import { Box, Paper } from '@mui/material';
+// The payslip's own font, the same one the PDF embeds (payslipFonts.js), so
+// the preview lays out exactly like the downloaded payslip.
+import '@fontsource/arimo/latin-400.css';
+import '@fontsource/arimo/latin-600.css';
+import '@fontsource/arimo/latin-700.css';
+import '@fontsource/arimo/latin-400-italic.css';
 import { formatCurrency } from '../utils/format.js';
 
 // Mirrors the PDF stylesheet in backend/src/templates/payslipTemplate.js so
@@ -16,27 +22,35 @@ const C = {
 };
 const FRAME = `1px solid ${C.frame}`;
 const LINE = `1px solid ${C.line}`;
-const FONT = "'Helvetica Neue', Arial, sans-serif";
+const FONT = "'Arimo', Arial, 'Helvetica Neue', sans-serif";
 
 const blockSx = { border: FRAME };
-// A whole-pixel line height keeps every row the same height, like the PDF.
-const cellSx = { px: 1.5, py: '7px', fontSize: 12, lineHeight: '17px', minWidth: 0, overflowWrap: 'anywhere' };
-const labelSx = { ...cellSx, color: C.inkSoft };
-const valueSx = { ...cellSx, fontWeight: 600, borderLeft: LINE };
-// Values sit left-aligned after a divider, like the details table.
-const amountSx = { whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', borderLeft: LINE };
+// One cell style for every table, with a whole-pixel line height so every
+// row is the same height. Labels are larger and bolder than their values,
+// and each value sits left-aligned after a divider.
+const cellSx = { px: 1.25, py: '7px', lineHeight: '17px', minWidth: 0, overflowWrap: 'anywhere', color: C.ink };
+const labelSx = { ...cellSx, fontSize: 12, fontWeight: 600 };
+const valueSx = { ...cellSx, fontSize: 11.5, fontWeight: 400, borderLeft: LINE };
+const amountSx = { whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' };
+const headCellSx = { ...cellSx, fontSize: 12, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase' };
 
-// Same column widths as PAY_COLUMNS in the PDF template: description |
-// amount (| description | amount). Amounts start at 30%, in line with the
-// net pay values, and the halves split at 50% like the details table.
-const PAY_COLUMNS = { 1: '30fr 70fr', 2: '30fr 20fr 30fr 20fr' };
-// Phones are too narrow for a 30% description column.
-const PHONE_PAY_COLUMNS = '55fr 45fr';
-const payHeadSx = {
-  backgroundColor: C.band, color: C.inkSoft, fontSize: 11, fontWeight: 700,
-  letterSpacing: '0.06em', textTransform: 'uppercase',
+// The same column grid as GRID in the PDF template, for every table:
+// label | value | label | value, so the dividers line up from the details
+// down to net pay. Single-pair rows use the first label column.
+const GRID = { 1: '26fr 74fr', 2: '26fr 24fr 26fr 24fr' };
+// Phones are too narrow for a 26% label column.
+const PHONE_COLUMNS = '55fr 45fr';
+
+// Pay table rows: header band, line items, and the totals band.
+const PAY_ROW = {
+  head: { row: { backgroundColor: C.band }, label: headCellSx, value: { ...headCellSx, borderLeft: LINE } },
+  item: { row: { borderTop: LINE }, label: labelSx, value: { ...valueSx, ...amountSx } },
+  total: {
+    row: { backgroundColor: C.bandStrong, borderTop: LINE },
+    label: { ...labelSx, fontWeight: 700 },
+    value: { ...valueSx, ...amountSx, fontWeight: 700 },
+  },
 };
-const payTotalSx = { backgroundColor: C.bandStrong, fontWeight: 700, borderTop: LINE };
 
 /**
  * The payslip only ever shows what the server's layout contains — the fields
@@ -51,7 +65,7 @@ function Details({ rows }) {
         {rows.map((row, idx) => (
           <Box
             key={row[0].key}
-            sx={{ display: 'grid', gridTemplateColumns: '22fr 28fr 22fr 28fr', borderTop: idx ? LINE : 'none' }}
+            sx={{ display: 'grid', gridTemplateColumns: GRID[2], borderTop: idx ? LINE : 'none' }}
           >
             {row.map((field, i) => (
               <Fragment key={field.key}>
@@ -65,7 +79,7 @@ function Details({ rows }) {
       {/* Mobile: one pair per line */}
       <Box sx={{ display: { xs: 'block', sm: 'none' } }}>
         {rows.flat().map((field, idx) => (
-          <Box key={field.key} sx={{ display: 'grid', gridTemplateColumns: '1fr 1.3fr', borderTop: idx ? LINE : 'none' }}>
+          <Box key={field.key} sx={{ display: 'grid', gridTemplateColumns: PHONE_COLUMNS, borderTop: idx ? LINE : 'none' }}>
             <Box sx={labelSx}>{field.label}</Box>
             <Box sx={valueSx}>{field.value}</Box>
           </Box>
@@ -76,15 +90,14 @@ function Details({ rows }) {
 }
 
 /** One row of the pay table: a description/amount pair per section. */
-function PayRow({ pairs, columns, sx }) {
-  // Cells take the row's font size, so the header row can set a smaller one.
-  const payCellSx = { ...cellSx, fontSize: 'inherit' };
+function PayRow({ pairs, columns, variant }) {
+  const style = PAY_ROW[variant];
   return (
-    <Box sx={{ display: 'grid', gridTemplateColumns: columns || PAY_COLUMNS[pairs.length], fontSize: 12, ...sx }}>
+    <Box sx={{ display: 'grid', gridTemplateColumns: columns || GRID[pairs.length], ...style.row }}>
       {pairs.map(([label, amount], i) => (
         <Fragment key={i}>
-          <Box sx={{ ...payCellSx, borderLeft: i ? FRAME : 'none' }}>{label}</Box>
-          <Box sx={{ ...payCellSx, ...amountSx }}>{amount}</Box>
+          <Box sx={{ ...style.label, borderLeft: i ? FRAME : 'none' }}>{label}</Box>
+          <Box sx={style.value}>{amount}</Box>
         </Fragment>
       ))}
     </Box>
@@ -106,20 +119,20 @@ function PaySections({ sections }) {
   return (
     <Box>
       <Box sx={{ ...blockSx, display: { xs: 'none', sm: 'block' } }}>
-        <PayRow pairs={sections.map(headPair)} sx={payHeadSx} />
+        <PayRow pairs={sections.map(headPair)} variant="head" />
         {Array.from({ length: rowCount }, (_, row) => (
-          <PayRow key={row} pairs={sections.map((section) => itemPair(section.items[row]))} sx={{ borderTop: LINE }} />
+          <PayRow key={row} pairs={sections.map((section) => itemPair(section.items[row]))} variant="item" />
         ))}
-        <PayRow pairs={sections.map(totalPair)} sx={payTotalSx} />
+        <PayRow pairs={sections.map(totalPair)} variant="total" />
       </Box>
       <Box sx={{ ...blockSx, display: { xs: 'block', sm: 'none' } }}>
         {sections.map((section, idx) => (
           <Box key={section.key} sx={{ borderTop: idx ? FRAME : 'none' }}>
-            <PayRow pairs={[headPair(section)]} columns={PHONE_PAY_COLUMNS} sx={payHeadSx} />
+            <PayRow pairs={[headPair(section)]} columns={PHONE_COLUMNS} variant="head" />
             {section.items.map((item) => (
-              <PayRow key={item.key} pairs={[itemPair(item)]} columns={PHONE_PAY_COLUMNS} sx={{ borderTop: LINE }} />
+              <PayRow key={item.key} pairs={[itemPair(item)]} columns={PHONE_COLUMNS} variant="item" />
             ))}
-            <PayRow pairs={[totalPair(section)]} columns={PHONE_PAY_COLUMNS} sx={payTotalSx} />
+            <PayRow pairs={[totalPair(section)]} columns={PHONE_COLUMNS} variant="total" />
           </Box>
         ))}
       </Box>
@@ -129,16 +142,15 @@ function PaySections({ sections }) {
 
 /**
  * Net pay as two label/value rows, like the PDF: the amount, then the
- * amount in words, each left-aligned after a divider.
+ * amount in words, with the values in line with the tables above.
  */
 function NetPay({ netPay }) {
-  const netCellSx = { ...cellSx, py: '9px' };
-  const labelCellSx = { ...netCellSx, fontWeight: 700 };
-  const valueCellSx = { ...netCellSx, borderLeft: LINE };
+  const labelCellSx = { ...labelSx, py: '9px', fontSize: 13, fontWeight: 700 };
+  const valueCellSx = { ...valueSx, py: '9px', fontSize: 12.5 };
   return (
-    <Box sx={{ ...blockSx, display: 'grid', gridTemplateColumns: { xs: '40fr 60fr', sm: '30fr 70fr' } }}>
+    <Box sx={{ ...blockSx, display: 'grid', gridTemplateColumns: { xs: '40fr 60fr', sm: GRID[1] } }}>
       <Box sx={labelCellSx}>{netPay.label}</Box>
-      <Box sx={{ ...valueCellSx, ...amountSx, fontWeight: 700, fontSize: 15 }}>{formatCurrency(netPay.amount)}</Box>
+      <Box sx={{ ...valueCellSx, ...amountSx, fontWeight: 700 }}>{formatCurrency(netPay.amount)}</Box>
       {netPay.inWords && (
         <>
           <Box sx={{ ...labelCellSx, borderTop: LINE }}>Net Pay in Words</Box>

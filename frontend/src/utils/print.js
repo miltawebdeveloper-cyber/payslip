@@ -28,14 +28,19 @@ export function printHtmlDocument(html) {
       // Removing the frame while its own print call is unwinding can cancel
       // the job in some browsers, so wait a moment after the dialog closes.
       win.addEventListener('afterprint', () => setTimeout(cleanup, 1000), { once: true });
-      try {
-        win.focus();
-        win.print();
-        resolve();
-      } catch (err) {
-        cleanup();
-        reject(err);
-      }
+      // The payslip embeds its font; print only once it has loaded, or the
+      // page would print in a fallback font with different widths.
+      const fontsReady = win.document.fonts?.ready ?? Promise.resolve();
+      fontsReady.catch(() => {}).then(() => {
+        try {
+          win.focus();
+          win.print();
+          resolve();
+        } catch (err) {
+          cleanup();
+          reject(err);
+        }
+      });
     };
 
     frame.srcdoc = html;
