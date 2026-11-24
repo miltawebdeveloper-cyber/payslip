@@ -124,27 +124,22 @@ function PaySections({ sections }) {
 }
 
 /**
- * Net pay on the pay table's columns: the amount lines up with the Earnings
- * amounts and the words sit in the right half of the same row (below it on
- * a phone, or when there is only one section).
+ * Net pay as two label/value rows, like the PDF: the amount, then the
+ * amount in words. Labels on the left, values right-aligned.
  */
-function NetPay({ netPay, sectionCount }) {
-  const twoUp = sectionCount === 2;
+function NetPay({ netPay }) {
   const netCellSx = { ...cellSx, py: '9px' };
+  const labelCellSx = { ...netCellSx, fontWeight: 700 };
+  const valueCellSx = { ...netCellSx, textAlign: 'right' };
   return (
-    <Box sx={{ ...blockSx, display: 'grid', gridTemplateColumns: { xs: PAY_COLUMNS[1], sm: PAY_COLUMNS[twoUp ? 2 : 1] } }}>
-      <Box sx={{ ...netCellSx, fontWeight: 700 }}>{netPay.label}</Box>
-      <Box sx={{ ...netCellSx, ...amountSx, fontWeight: 700, fontSize: 15 }}>{formatCurrency(netPay.amount)}</Box>
+    <Box sx={{ ...blockSx, display: 'grid', gridTemplateColumns: { xs: '40fr 60fr', sm: '30fr 70fr' } }}>
+      <Box sx={labelCellSx}>{netPay.label}</Box>
+      <Box sx={{ ...valueCellSx, ...amountSx, fontWeight: 700, fontSize: 15 }}>{formatCurrency(netPay.amount)}</Box>
       {netPay.inWords && (
-        <Box
-          sx={{
-            ...netCellSx, gridColumn: 'span 2', fontWeight: 600, fontSize: 11.5, color: C.inkSoft,
-            borderTop: { xs: LINE, sm: twoUp ? 'none' : LINE },
-            borderLeft: { xs: 'none', sm: twoUp ? FRAME : 'none' },
-          }}
-        >
-          {netPay.inWords}
-        </Box>
+        <>
+          <Box sx={{ ...labelCellSx, borderTop: LINE }}>Net Pay in Words</Box>
+          <Box sx={{ ...valueCellSx, fontWeight: 600, borderTop: LINE }}>{netPay.inWords}</Box>
+        </>
       )}
     </Box>
   );
@@ -192,7 +187,7 @@ export default function PayslipPreview({ data }) {
       <Box sx={{ display: 'grid', gap: 1.75, p: { xs: 1.25, sm: 2 } }}>
         <Details rows={detailRows} />
         <PaySections sections={paySections} />
-        <NetPay netPay={netPay} sectionCount={paySections.length} />
+        <NetPay netPay={netPay} />
       </Box>
 
       <Box sx={{ textAlign: 'center', fontSize: 11, fontStyle: 'italic', color: C.inkMuted, px: 1.5, pb: 1.75 }}>

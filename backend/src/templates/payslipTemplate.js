@@ -31,9 +31,8 @@ function renderHeader(company) {
     </header>`;
 }
 
-// Column widths (%) shared by the pay table and the net pay row, so every
-// amount sits in one right-aligned column and the words line up beneath the
-// Deductions descriptions. The halves split at 50%, like the details table.
+// Pay table column widths (%): every amount sits in one right-aligned column
+// per section, and the halves split at 50%, like the details table.
 const PAY_COLUMNS = {
   1: [60, 40],
   2: [30, 20, 30, 20],
@@ -105,22 +104,19 @@ function renderPaySections(paySections) {
 }
 
 /**
- * Net pay on the same column grid as the pay table: the amount lines up with
- * the Earnings amounts, and the words sit in the right half on the same row
- * (or on their own row when there is only one section).
+ * Net pay as two label/value rows: the amount, then the amount in words.
+ * Labels on the left, values right-aligned to the payslip's right edge.
  */
-function renderNetPay(netPay, sectionCount) {
-  const twoUp = sectionCount === 2;
-  const words = netPay.inWords ? escapeHtml(netPay.inWords) : '';
-  const main = `<th>${escapeHtml(netPay.label)}</th><td class="amount net-amount">${formatCurrency(netPay.amount)}</td>`;
-  const rows = twoUp
-    ? `<tr>${main}<td class="split net-words" colspan="2">${words}</td></tr>`
-    : `<tr>${main}</tr>${words ? `<tr><td class="net-words" colspan="2">${words}</td></tr>` : ''}`;
+function renderNetPay(netPay) {
+  const words = netPay.inWords
+    ? `<tr><th>Net Pay in Words</th><td class="net-value net-words">${escapeHtml(netPay.inWords)}</td></tr>`
+    : '';
 
   return `
     <table class="block grid net">
-      ${colgroup(PAY_COLUMNS[twoUp ? 2 : 1])}
-      ${rows}
+      ${colgroup([30, 70])}
+      <tr><th>${escapeHtml(netPay.label)}</th><td class="net-value net-amount">${formatCurrency(netPay.amount)}</td></tr>
+      ${words}
     </table>`;
 }
 
@@ -209,8 +205,9 @@ function renderPayslipHtml(layout, { browserPrint = false } = {}) {
 
   .net th, .net td { padding-top: 9px; padding-bottom: 9px; }
   .net th { font-weight: 700; }
-  .grid .net-amount { font-size: 14px; font-weight: 700; }
-  .grid .net-words { font-size: 10.5px; font-weight: 600; color: var(--ink-soft); }
+  .grid .net-value { text-align: right; }
+  .grid .net-amount { font-size: 14px; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .grid .net-words { font-weight: 600; }
 
   .note { text-align: center; font-size: 10px; font-style: italic; color: var(--ink-muted); padding: 0 12px 14px; }
   ${browserPrint ? BROWSER_PRINT_CSS : ''}
@@ -223,7 +220,7 @@ function renderPayslipHtml(layout, { browserPrint = false } = {}) {
     <div class="content">
       ${renderDetails(layout.detailRows)}
       ${renderPaySections(layout.paySections)}
-      ${renderNetPay(layout.netPay, layout.paySections.length)}
+      ${renderNetPay(layout.netPay)}
     </div>
     <div class="note">Note: This is a system generated payslip and does not require signature</div>
   </div>
