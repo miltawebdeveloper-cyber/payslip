@@ -31,10 +31,11 @@ function renderHeader(company) {
     </header>`;
 }
 
-// Pay table column widths (%): every amount sits in one right-aligned column
-// per section, and the halves split at 50%, like the details table.
+// Pay table column widths (%). Like the details table, each value sits in
+// its own left-aligned column after a divider. The first amount column starts
+// at 30%, where the net pay values start too, and the halves split at 50%.
 const PAY_COLUMNS = {
-  1: [60, 40],
+  1: [30, 70],
   2: [30, 20, 30, 20],
 };
 
@@ -105,7 +106,8 @@ function renderPaySections(paySections) {
 
 /**
  * Net pay as two label/value rows: the amount, then the amount in words.
- * Labels on the left, values right-aligned to the payslip's right edge.
+ * Like the details table: label, divider, then the value left-aligned, in
+ * line with the Earnings amounts above.
  */
 function renderNetPay(netPay) {
   const words = netPay.inWords
@@ -192,7 +194,7 @@ function renderPayslipHtml(layout, { browserPrint = false } = {}) {
   }
   .grid tr + tr > * { border-top: 1px solid var(--line); }
   .grid .split { border-left: 1px solid var(--frame); }
-  .grid .amount { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .grid .amount { border-left: 1px solid var(--line); white-space: nowrap; font-variant-numeric: tabular-nums; }
 
   .details th { color: var(--ink-soft); }
   .details td { font-weight: 600; border-left: 1px solid var(--line); }
@@ -205,7 +207,7 @@ function renderPayslipHtml(layout, { browserPrint = false } = {}) {
 
   .net th, .net td { padding-top: 9px; padding-bottom: 9px; }
   .net th { font-weight: 700; }
-  .grid .net-value { text-align: right; }
+  .grid .net-value { border-left: 1px solid var(--line); }
   .grid .net-amount { font-size: 14px; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .grid .net-words { font-weight: 600; }
 
