@@ -95,27 +95,49 @@ async function generatePayslipPdf(employeeId, monthNum, yearNum, options) {
     console.warn('Local PDF copy skipped (normal on a read-only disk):', fsErr.message);
   }
 
-  let driveFile = null;
+  // A failed Drive save doesn't block the download, but it is reported back
+  // (see setDriveHeaders) so the user isn't told it was saved when it wasn't.
+  let drive;
   try {
-    driveFile = await uploadPayslipPdf({
+    const driveFile = await uploadPayslipPdf({
       employee: data.employee,
       month: monthNum,
       year: yearNum,
       pdfBuffer,
       fileName,
     });
+    drive = driveFile
+      ? { saved: true }
+      : { saved: false, error: 'Google Drive is not configured on the server' };
   } catch (driveErr) {
     // eslint-disable-next-line no-console
     console.warn('Google Drive payslip upload error:', driveErr.message);
+    drive = { saved: false, error: driveErr.message };
   }
 
-  return { fileName, pdfBuffer, driveFile };
+  return { fileName, pdfBuffer, drive };
+}
+
+/**
+ * Tells the browser how many of the PDFs reached Google Drive, and why the
+ * first one that didn't failed. Headers, because the body is the file itself.
+ */
+function setDriveHeaders(res, driveResults) {
+  const saved = driveResults.filter((result) => result.saved).length;
+  res.setHeader('X-Drive-Saved', String(saved));
+  res.setHeader('X-Drive-Total', String(driveResults.length));
+  const failure = driveResults.find((result) => !result.saved);
+  if (failure) {
+    // Header values must be plain ASCII on one line.
+    res.setHeader('X-Drive-Error', encodeURIComponent(String(failure.error || 'Unknown error').slice(0, 300)));
+  }
 }
 
 const generate = catchAsync(async (req, res) => {
   const { employeeId, month, year } = req.body;
-  const { fileName, pdfBuffer } = await generatePayslipPdf(employeeId, parseInt(month, 10), parseInt(year, 10));
+  const { fileName, pdfBuffer, drive } = await generatePayslipPdf(employeeId, parseInt(month, 10), parseInt(year, 10));
 
+  setDriveHeaders(res, [drive]);
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
   res.send(pdfBuffer);
@@ -137,11 +159,14 @@ const generateAll = catchAsync(async (req, res) => {
   // One at a time on purpose: each render opens a Chromium tab, and running
   // them sequentially keeps memory flat however many employees there are.
   const files = [];
+  const driveResults = [];
   for (const row of rows) {
-    const { fileName, pdfBuffer } = await generatePayslipPdf(row.employee_id, monthNum, yearNum, { records });
+    const { fileName, pdfBuffer, drive } = await generatePayslipPdf(row.employee_id, monthNum, yearNum, { records });
     files.push({ name: fileName, data: pdfBuffer });
+    driveResults.push(drive);
   }
 
+  setDriveHeaders(res, driveResults);
   const zipName = `Payslips_${MONTH_NAMES[monthNum - 1]}_${yearNum}.zip`;
   res.setHeader('Content-Type', 'application/zip');
   res.setHeader('Content-Disposition', `attachment; filename="${zipName}"`);

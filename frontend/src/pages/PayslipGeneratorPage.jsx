@@ -296,9 +296,11 @@ export default function PayslipGeneratorPage() {
     const [month, year] = selectedMonthKey.split('-').map(Number);
     setGenerating(true);
     try {
-      const { blob, filename } = await generatePayslipPdf(selectedEmployeeId, month, year);
+      const { blob, filename, drive } = await generatePayslipPdf(selectedEmployeeId, month, year);
       downloadBlob(blob, filename);
-      notify('Payslip generated and saved to Google Drive');
+      if (!drive) notify('Payslip downloaded');
+      else if (drive.saved === drive.total) notify('Payslip generated and saved to Google Drive');
+      else notify(`Payslip downloaded, but it was NOT saved to Google Drive: ${drive.error}`, 'warning');
     } catch (err) {
       notify(await getErrorMessage(err, 'Failed to generate payslip PDF'), 'error');
     } finally {
@@ -327,9 +329,16 @@ export default function PayslipGeneratorPage() {
     const [month, year] = selectedMonthKey.split('-').map(Number);
     setGeneratingAll(true);
     try {
-      const { blob, filename } = await generateAllPayslips(month, year);
+      const { blob, filename, drive } = await generateAllPayslips(month, year);
       downloadBlob(blob, filename);
-      notify(`${employees.length} payslips downloaded and saved to Google Drive`);
+      if (!drive) notify(`${employees.length} payslips downloaded`);
+      else if (drive.saved === drive.total) notify(`${drive.total} payslips downloaded and saved to Google Drive`);
+      else {
+        notify(
+          `${drive.total} payslips downloaded, but only ${drive.saved} were saved to Google Drive: ${drive.error}`,
+          'warning'
+        );
+      }
     } catch (err) {
       notify(await getErrorMessage(err, 'Failed to generate the payslips'), 'error');
     } finally {
@@ -583,7 +592,8 @@ export default function PayslipGeneratorPage() {
 
       <Snackbar
         open={snackbar.open}
-        autoHideDuration={4000}
+        // Problems stay up longer so the reason can be read.
+        autoHideDuration={snackbar.severity === 'success' ? 4000 : 12000}
         onClose={() => setSnackbar((s) => ({ ...s, open: false }))}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
       >

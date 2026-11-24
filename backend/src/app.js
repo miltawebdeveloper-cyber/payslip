@@ -14,7 +14,12 @@ const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173')
   .split(',')
   .map((origin) => origin.trim());
 
-app.use(cors({ origin: allowedOrigins }));
+// Exposed so a frontend on another origin can still read the download's
+// file name and the Google Drive save result (see payslipController).
+app.use(cors({
+  origin: allowedOrigins,
+  exposedHeaders: ['Content-Disposition', 'X-Drive-Saved', 'X-Drive-Total', 'X-Drive-Error'],
+}));
 app.use(express.json());
 if (process.env.NODE_ENV !== 'test') {
   app.use(morgan('dev'));

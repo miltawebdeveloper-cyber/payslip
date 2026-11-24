@@ -30,13 +30,38 @@ function filenameFrom(response, fallback) {
   return match ? match[1] : fallback;
 }
 
+/**
+ * How many of the generated PDFs the server saved to Google Drive, and why
+ * the first unsaved one failed: { saved, total, error }. Null when the
+ * server didn't say (an older backend).
+ */
+function driveResultFrom(response) {
+  const saved = Number(response.headers['x-drive-saved']);
+  const total = Number(response.headers['x-drive-total']);
+  if (!Number.isInteger(saved) || !Number.isInteger(total) || total === 0) return null;
+  const rawError = response.headers['x-drive-error'];
+  let error = null;
+  if (rawError) {
+    try {
+      error = decodeURIComponent(rawError);
+    } catch {
+      error = rawError;
+    }
+  }
+  return { saved, total, error };
+}
+
 export async function generatePayslipPdf(employeeId, month, year) {
   const response = await apiClient.post(
     '/payslip/generate',
     { employeeId, month, year },
     { responseType: 'blob' }
   );
-  return { blob: response.data, filename: filenameFrom(response, `Payslip_${employeeId}_${month}_${year}.pdf`) };
+  return {
+    blob: response.data,
+    filename: filenameFrom(response, `Payslip_${employeeId}_${month}_${year}.pdf`),
+    drive: driveResultFrom(response),
+  };
 }
 
 export async function generateAllPayslips(month, year) {
@@ -45,7 +70,11 @@ export async function generateAllPayslips(month, year) {
     { month, year },
     { responseType: 'blob' }
   );
-  return { blob: response.data, filename: filenameFrom(response, `Payslips_${month}_${year}.zip`) };
+  return {
+    blob: response.data,
+    filename: filenameFrom(response, `Payslips_${month}_${year}.zip`),
+    drive: driveResultFrom(response),
+  };
 }
 
 // Requests made with responseType 'blob' or 'text' receive their JSON error
