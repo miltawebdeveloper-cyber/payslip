@@ -156,6 +156,11 @@ function renderPayslipHtml(layout, { browserPrint = false } = {}) {
     --band: #F6F7F9;
     --band-strong: #F1F3F5;
     --brand: #266929;
+    /* Space around and between the tables, and the left/right padding of
+       every part of the sheet, so they all share one edge. */
+    --table-space: 30px;
+    /* Top/bottom padding of the header, and the space below the note. */
+    --gap: 16px;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; }
@@ -174,22 +179,23 @@ function renderPayslipHtml(layout, { browserPrint = false } = {}) {
   p { margin: 0; }
   .sheet { max-width: 820px; margin: 0 auto; background: #fff; border: 1px solid var(--frame); break-inside: avoid; }
 
-  .brand { display: flex; justify-content: center; align-items: center; gap: 18px; padding: 18px 22px; }
+  .brand { display: flex; justify-content: center; align-items: center; gap: 18px; padding: var(--gap) var(--table-space); }
   .logo img { display: block; height: 60px; width: auto; max-width: 160px; }
   .company { text-align: left; }
   .company.with-logo { padding-left: 18px; border-left: 1px solid var(--frame); }
   .company-name { font-size: 19px; font-weight: 700; margin-bottom: 3px; letter-spacing: -0.01em; }
   .company-meta { font-size: 10.5px; line-height: 1.6; color: var(--ink-soft); }
 
+  /* Same metrics as a table row (7px padding, 16px line height). */
   .title {
-    text-align: center; font-weight: 700; font-size: 12px; letter-spacing: 0.03em;
-    padding: 8px 12px; background: var(--band); color: var(--brand);
+    text-align: center; font-weight: 700; font-size: 12px; letter-spacing: 0.03em; line-height: 16px;
+    padding: 7px var(--table-space); background: var(--band); color: var(--brand);
     border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
   }
 
-  .content { padding: 16px; }
+  .content { padding: var(--table-space); }
   .block { border: 1px solid var(--frame); }
-  .block + .block { margin-top: 14px; }
+  .block + .block { margin-top: var(--table-space); }
 
   /* One cell style for every table, with a whole-pixel line height, so each
      row is exactly the same height and every row line lands on a pixel.
@@ -213,13 +219,14 @@ function renderPayslipHtml(layout, { browserPrint = false } = {}) {
   }
   .grid .pay-total > * { background: var(--band-strong); font-weight: 700; }
 
-  .net th, .net td { padding-top: 9px; padding-bottom: 9px; }
   .net th { font-size: 12.5px; font-weight: 700; }
   .net td { font-size: 12px; font-weight: 700; }
   .net .net-amount { white-space: nowrap; font-variant-numeric: tabular-nums; }
   .net .net-words { font-weight: 600; }
 
-  .note { text-align: center; font-size: 10px; font-style: italic; color: var(--ink-muted); padding: 0 12px 14px; }
+  /* Line height close to the text size, so the visible gap above and below
+     the note matches the 16px gaps between the tables. */
+  .note { text-align: center; font-size: 10px; line-height: 12px; font-style: italic; color: var(--ink-muted); padding: 0 var(--table-space) var(--gap); }
   ${browserPrint ? BROWSER_PRINT_CSS : ''}
 </style>
 </head>

@@ -24,6 +24,13 @@ const FRAME = `1px solid ${C.frame}`;
 const LINE = `1px solid ${C.line}`;
 const FONT = "'Arimo', Arial, 'Helvetica Neue', sans-serif";
 
+// Like --table-space in the PDF template: space around and between the
+// tables, and the left/right padding of every part of the payslip.
+// 30px on tablet / desktop, 10px on a phone.
+const TABLE_SPACE = { xs: 1.25, sm: '30px' };
+// Like --gap: top/bottom padding of the header, and the space below the note.
+const GAP = { xs: 1.25, sm: 2 };
+
 const blockSx = { border: FRAME };
 // One cell style for every table, with a whole-pixel line height so every
 // row is the same height. Labels are larger and bolder than their values,
@@ -145,8 +152,9 @@ function PaySections({ sections }) {
  * amount in words, with the values in line with the tables above.
  */
 function NetPay({ netPay }) {
-  const labelCellSx = { ...labelSx, py: '9px', fontSize: 13, fontWeight: 700 };
-  const valueCellSx = { ...valueSx, py: '9px', fontSize: 12.5 };
+  // Same row padding as every other row.
+  const labelCellSx = { ...labelSx, fontSize: 13, fontWeight: 700 };
+  const valueCellSx = { ...valueSx, fontSize: 12.5 };
   return (
     <Box sx={{ ...blockSx, display: 'grid', gridTemplateColumns: { xs: '40fr 60fr', sm: GRID[1] } }}>
       <Box sx={labelCellSx}>{netPay.label}</Box>
@@ -171,7 +179,7 @@ export default function PayslipPreview({ data }) {
       variant="outlined"
       sx={{ maxWidth: 820, mx: 'auto', overflow: 'hidden', borderRadius: 0, borderColor: C.frame, color: C.ink, fontFamily: FONT, boxShadow: 3 }}
     >
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: { xs: 1.5, sm: 2.25 }, p: { xs: 1.5, sm: 2.25 } }}>
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: { xs: 1.5, sm: 2.25 }, py: GAP, px: TABLE_SPACE }}>
         {company.logoUrl && (
           <Box
             component="img"
@@ -193,20 +201,23 @@ export default function PayslipPreview({ data }) {
 
       <Box
         sx={{
-          textAlign: 'center', py: 1, px: 1.5, backgroundColor: C.band, color: C.brand, fontWeight: 700,
+          // Same metrics as a table row (cellSx).
+          textAlign: 'center', py: '7px', px: TABLE_SPACE, lineHeight: '17px', backgroundColor: C.band, color: C.brand, fontWeight: 700,
           fontSize: 13, letterSpacing: '0.03em', borderTop: LINE, borderBottom: LINE,
         }}
       >
         {title}
       </Box>
 
-      <Box sx={{ display: 'grid', gap: 1.75, p: { xs: 1.25, sm: 2 } }}>
+      <Box sx={{ display: 'grid', gap: TABLE_SPACE, p: TABLE_SPACE }}>
         <Details rows={detailRows} />
         <PaySections sections={paySections} />
         <NetPay netPay={netPay} />
       </Box>
 
-      <Box sx={{ textAlign: 'center', fontSize: 11, fontStyle: 'italic', color: C.inkMuted, px: 1.5, pb: 1.75 }}>
+      {/* Line height close to the text size, so the visible gap above and
+          below the note matches the gaps between the tables. */}
+      <Box sx={{ textAlign: 'center', fontSize: 11, lineHeight: '13px', fontStyle: 'italic', color: C.inkMuted, px: TABLE_SPACE, pb: GAP }}>
         Note: This is a system generated payslip and does not require signature
       </Box>
     </Paper>
